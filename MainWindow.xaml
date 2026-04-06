@@ -191,14 +191,14 @@
                                             <TextBox Style="{StaticResource SelectableInfoTextBoxStyle}"
                                                      Margin="0,0,0,2"
                                                      FontWeight="SemiBold"
-                                                     Text="{Binding Title}" />
+                                                     Text="{Binding Title, Mode=OneWay}" />
                                             <TextBox Style="{StaticResource SelectableInfoTextBoxStyle}"
                                                      Margin="0,0,0,2"
                                                      Foreground="#4B5563"
-                                                     Text="{Binding TimeRange}" />
+                                                     Text="{Binding TimeRange, Mode=OneWay}" />
                                             <TextBox Style="{StaticResource SelectableInfoTextBoxStyle}"
                                                      Margin="0"
-                                                     Text="{Binding Description}" />
+                                                     Text="{Binding Description, Mode=OneWay}" />
                                         </StackPanel>
                                     </Border>
                                 </DataTemplate>
@@ -272,3 +272,4 @@
         </Border>
     </Grid>
 </Window>
+
