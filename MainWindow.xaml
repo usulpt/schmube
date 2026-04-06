@@ -7,6 +7,19 @@
         MinHeight="600"
         MinWidth="860"
         WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <Style x:Key="SelectableInfoTextBoxStyle" TargetType="TextBox">
+            <Setter Property="IsReadOnly" Value="True" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,4,0,10" />
+            <Setter Property="Foreground" Value="#374151" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="IsReadOnlyCaretVisible" Value="True" />
+        </Style>
+    </Window.Resources>
+
     <Grid Margin="14">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -71,12 +84,6 @@
                           VerticalAlignment="Top"
                           Content="Favorites only"
                           Click="FavoritesOnlyCheckBox_Click" />
-
-                <CheckBox x:Name="ApplyDefaultGroupsCheckBox"
-                          Margin="0,26,12,0"
-                          VerticalAlignment="Top"
-                          Content="Apply default groups"
-                          Click="ApplyDefaultGroupsCheckBox_Click" />
             </WrapPanel>
 
             <WrapPanel DockPanel.Dock="Right" VerticalAlignment="Bottom">
@@ -126,15 +133,15 @@
                             </Border>
 
                             <StackPanel Grid.Column="2">
-                                <TextBlock x:Name="SelectedChannelNameTextBlock"
-                                           FontSize="16"
-                                           FontWeight="SemiBold"
-                                           Text="No channel selected"
-                                           TextWrapping="Wrap" />
-                                <TextBlock x:Name="SelectedChannelFavoriteStateTextBlock"
-                                           Margin="0,4,0,10"
-                                           Foreground="#4B5563"
-                                           Text="Not a favorite" />
+                                <TextBox x:Name="SelectedChannelNameTextBox"
+                                         Style="{StaticResource SelectableInfoTextBoxStyle}"
+                                         FontSize="16"
+                                         FontWeight="SemiBold"
+                                         Margin="0,0,0,4" />
+                                <TextBox x:Name="SelectedChannelFavoriteStateTextBox"
+                                         Style="{StaticResource SelectableInfoTextBoxStyle}"
+                                         Margin="0,0,0,10"
+                                         Foreground="#4B5563" />
                                 <Button x:Name="ToggleFavoriteButton"
                                         Width="124"
                                         Height="30"
@@ -144,34 +151,28 @@
                             </StackPanel>
                         </Grid>
 
-                        <TextBlock x:Name="ChannelSummaryTextBlock"
-                                   Margin="0,0,0,12"
-                                   Foreground="#4B5563"
-                                   Text="No channels loaded." />
+                        <TextBox x:Name="ChannelSummaryTextBox"
+                                 Style="{StaticResource SelectableInfoTextBoxStyle}"
+                                 Margin="0,0,0,12"
+                                 Foreground="#4B5563" />
 
                         <TextBlock FontWeight="SemiBold" Text="Group" />
-                        <TextBlock x:Name="SelectedChannelGroupTextBlock"
-                                   Margin="0,4,0,10"
-                                   Foreground="#374151"
-                                   Text="Load a playlist to browse channels." />
+                        <TextBox x:Name="SelectedChannelGroupTextBox"
+                                 Style="{StaticResource SelectableInfoTextBoxStyle}" />
 
                         <TextBlock FontWeight="SemiBold" Text="Channel ID" />
-                        <TextBlock x:Name="SelectedChannelIdTextBlock"
-                                   Margin="0,4,0,10"
-                                   Foreground="#374151"
-                                   Text="Not available" />
+                        <TextBox x:Name="SelectedChannelIdTextBox"
+                                 Style="{StaticResource SelectableInfoTextBoxStyle}" />
 
-                        <TextBlock FontWeight="SemiBold" Text="Configured Default Groups" />
-                        <TextBlock x:Name="ConfiguredDefaultsTextBlock"
-                                   Margin="0,4,0,10"
-                                   Foreground="#374151"
-                                   Text="All groups" />
+                        <TextBlock FontWeight="SemiBold" Text="Configured Default Group" />
+                        <TextBox x:Name="ConfiguredDefaultTextBox"
+                                 Style="{StaticResource SelectableInfoTextBoxStyle}" />
 
                         <TextBlock FontWeight="SemiBold" Text="Program Guide" />
-                        <TextBlock x:Name="ProgramGuideStatusTextBlock"
-                                   Margin="0,4,0,8"
-                                   Foreground="#4B5563"
-                                   Text="Select a channel to load the guide." />
+                        <TextBox x:Name="ProgramGuideStatusTextBox"
+                                 Style="{StaticResource SelectableInfoTextBoxStyle}"
+                                 Margin="0,4,0,8"
+                                 Foreground="#4B5563" />
 
                         <ListBox x:Name="ProgramGuideListBox"
                                  Height="220"
@@ -187,9 +188,17 @@
                                             BorderThickness="1"
                                             CornerRadius="8">
                                         <StackPanel>
-                                            <TextBlock FontWeight="SemiBold" Text="{Binding Title}" TextWrapping="Wrap" />
-                                            <TextBlock Margin="0,4,0,4" Foreground="#4B5563" Text="{Binding TimeRange}" />
-                                            <TextBlock Foreground="#374151" Text="{Binding Description}" TextWrapping="Wrap" />
+                                            <TextBox Style="{StaticResource SelectableInfoTextBoxStyle}"
+                                                     Margin="0,0,0,2"
+                                                     FontWeight="SemiBold"
+                                                     Text="{Binding Title}" />
+                                            <TextBox Style="{StaticResource SelectableInfoTextBoxStyle}"
+                                                     Margin="0,0,0,2"
+                                                     Foreground="#4B5563"
+                                                     Text="{Binding TimeRange}" />
+                                            <TextBox Style="{StaticResource SelectableInfoTextBoxStyle}"
+                                                     Margin="0"
+                                                     Text="{Binding Description}" />
                                         </StackPanel>
                                     </Border>
                                 </DataTemplate>
@@ -197,11 +206,9 @@
                         </ListBox>
 
                         <TextBlock FontWeight="SemiBold" Text="Stream URL" />
-                        <TextBlock x:Name="SelectedChannelUrlTextBlock"
-                                   Margin="0,4,0,0"
-                                   TextWrapping="Wrap"
-                                   Foreground="#374151"
-                                   Text="Load the playlist and choose a channel from the list." />
+                        <TextBox x:Name="SelectedChannelUrlTextBox"
+                                 Style="{StaticResource SelectableInfoTextBoxStyle}"
+                                 Margin="0,4,0,0" />
                     </StackPanel>
                 </ScrollViewer>
             </Border>

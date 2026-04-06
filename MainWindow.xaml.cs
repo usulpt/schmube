@@ -26,12 +26,12 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<string> _groupOptions = [AllGroupsLabel];
     private readonly ObservableCollection<ProgramGuideEntry> _programGuideEntries = [];
     private readonly HashSet<string> _favoriteChannelKeys = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _defaultGroups = new(StringComparer.CurrentCultureIgnoreCase);
 
     private readonly SchmubeAppConfig _appConfig;
     private CancellationTokenSource? _logoWarmupCts;
     private CancellationTokenSource? _epgLoadCts;
     private bool _autoLoadAttempted;
+    private string _defaultGroup = string.Empty;
     private PlayerWindow? _playerWindow;
 
     public MainWindow()
@@ -64,11 +64,7 @@ public partial class MainWindow : Window
             _favoriteChannelKeys.Add(key);
         }
 
-        _defaultGroups.Clear();
-        foreach (var group in _appConfig.DefaultGroups.Where(group => !string.IsNullOrWhiteSpace(group)))
-        {
-            _defaultGroups.Add(group.Trim());
-        }
+        _defaultGroup = _appConfig.DefaultGroup?.Trim() ?? string.Empty;
 
         StreamUrlTextBox.Text = !string.IsNullOrWhiteSpace(_appConfig.SubscriptionUrl)
             ? _appConfig.SubscriptionUrl
@@ -77,9 +73,7 @@ public partial class MainWindow : Window
         RefererTextBox.Text = settings.Referer;
         KeepOnTopCheckBox.IsChecked = settings.KeepPlayerOnTop;
         FavoritesOnlyCheckBox.IsChecked = false;
-        ApplyDefaultGroupsCheckBox.IsEnabled = _defaultGroups.Count > 0;
-        ApplyDefaultGroupsCheckBox.IsChecked = _defaultGroups.Count > 0 && _appConfig.ApplyDefaultGroupsOnLoad;
-        ConfiguredDefaultsTextBlock.Text = FormatDefaultGroups();
+        ConfiguredDefaultTextBox.Text = FormatDefaultGroup();
     }
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -223,6 +217,7 @@ public partial class MainWindow : Window
                 .ThenBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase));
 
             RefreshGroupOptions();
+            SelectDefaultGroupIfAvailable();
             ApplyChannelFilter(selectFirstChannel: true);
             StartLogoWarmup(channels);
             StatusTextBlock.Text = _allChannels.Count == 0
@@ -324,7 +319,7 @@ public partial class MainWindow : Window
         var settings = CollectSettingsFromUi();
         var cts = new CancellationTokenSource();
         _epgLoadCts = cts;
-        ProgramGuideStatusTextBlock.Text = "Loading program guide...";
+        ProgramGuideStatusTextBox.Text = "Loading program guide...";
 
         try
         {
@@ -340,7 +335,7 @@ public partial class MainWindow : Window
                 _programGuideEntries.Add(entry);
             }
 
-            ProgramGuideStatusTextBlock.Text = entries.Count == 0
+            ProgramGuideStatusTextBox.Text = entries.Count == 0
                 ? "No guide data available."
                 : $"{entries.Count} upcoming programs.";
         }
@@ -359,7 +354,7 @@ public partial class MainWindow : Window
     private void ClearProgramGuide(string message)
     {
         _programGuideEntries.Clear();
-        ProgramGuideStatusTextBlock.Text = message;
+        ProgramGuideStatusTextBox.Text = message;
     }
 
     private void RefreshGroupOptions()
@@ -382,19 +377,29 @@ public partial class MainWindow : Window
         GroupFilterComboBox.SelectedItem = restoredSelection ?? AllGroupsLabel;
     }
 
+    private void SelectDefaultGroupIfAvailable()
+    {
+        if (string.IsNullOrWhiteSpace(_defaultGroup))
+        {
+            GroupFilterComboBox.SelectedItem = AllGroupsLabel;
+            return;
+        }
+
+        var matchedGroup = _groupOptions.FirstOrDefault(group => string.Equals(group, _defaultGroup, StringComparison.CurrentCultureIgnoreCase));
+        GroupFilterComboBox.SelectedItem = matchedGroup ?? AllGroupsLabel;
+    }
+
     private void ApplyChannelFilter(bool selectFirstChannel)
     {
         var selectedStream = SelectedChannel?.StreamUri.ToString();
         var searchText = ChannelSearchTextBox.Text.Trim();
         var selectedGroup = GroupFilterComboBox.SelectedItem as string;
         var favoritesOnly = FavoritesOnlyCheckBox.IsChecked == true;
-        var applyDefaultGroups = ApplyDefaultGroupsCheckBox.IsChecked == true && _defaultGroups.Count > 0;
 
         var filteredChannels = _allChannels
             .Where(channel => MatchesSearch(channel, searchText))
             .Where(channel => MatchesGroup(channel, selectedGroup))
             .Where(channel => !favoritesOnly || channel.IsFavorite)
-            .Where(channel => !applyDefaultGroups || _defaultGroups.Contains(channel.GroupTitle))
             .OrderByDescending(channel => channel.IsFavorite)
             .ThenBy(channel => channel.GroupTitle, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase)
@@ -450,7 +455,7 @@ public partial class MainWindow : Window
     {
         if (_allChannels.Count == 0)
         {
-            ChannelSummaryTextBlock.Text = "No channels loaded.";
+            ChannelSummaryTextBox.Text = "No channels loaded.";
             return;
         }
 
@@ -461,38 +466,38 @@ public partial class MainWindow : Window
             summary += " Favorites only.";
         }
 
-        if (ApplyDefaultGroupsCheckBox.IsChecked == true && _defaultGroups.Count > 0)
+        if (!string.IsNullOrWhiteSpace(GroupFilterComboBox.SelectedItem as string) && !string.Equals(GroupFilterComboBox.SelectedItem as string, AllGroupsLabel, StringComparison.Ordinal))
         {
-            summary += " Default groups active.";
+            summary += $" Group: {GroupFilterComboBox.SelectedItem}.";
         }
 
-        ChannelSummaryTextBlock.Text = summary;
+        ChannelSummaryTextBox.Text = summary;
     }
 
     private void UpdateSelectedChannelDetails(PlaylistChannel? channel)
     {
         if (channel is null)
         {
-            SelectedChannelNameTextBlock.Text = "No channel selected";
-            SelectedChannelFavoriteStateTextBlock.Text = "Not a favorite";
-            SelectedChannelGroupTextBlock.Text = "Load a playlist to browse channels.";
-            SelectedChannelIdTextBlock.Text = "Not available";
-            SelectedChannelUrlTextBlock.Text = "Load the playlist and choose a channel from the list.";
+            SelectedChannelNameTextBox.Text = "No channel selected";
+            SelectedChannelFavoriteStateTextBox.Text = "Not a favorite";
+            SelectedChannelGroupTextBox.Text = "Load a playlist to browse channels.";
+            SelectedChannelIdTextBox.Text = "Not available";
+            SelectedChannelUrlTextBox.Text = "Load the playlist and choose a channel from the list.";
             SelectedChannelLogoImage.Source = null;
             ToggleFavoriteButton.IsEnabled = false;
             ToggleFavoriteButton.Content = "Add Favorite";
             return;
         }
 
-        SelectedChannelNameTextBlock.Text = channel.Name;
-        SelectedChannelFavoriteStateTextBlock.Text = channel.IsFavorite ? "Favorite" : "Not a favorite";
-        SelectedChannelGroupTextBlock.Text = string.IsNullOrWhiteSpace(channel.GroupTitle)
+        SelectedChannelNameTextBox.Text = channel.Name;
+        SelectedChannelFavoriteStateTextBox.Text = channel.IsFavorite ? "Favorite" : "Not a favorite";
+        SelectedChannelGroupTextBox.Text = string.IsNullOrWhiteSpace(channel.GroupTitle)
             ? "Ungrouped"
             : channel.GroupTitle;
-        SelectedChannelIdTextBlock.Text = string.IsNullOrWhiteSpace(channel.TvgId)
+        SelectedChannelIdTextBox.Text = string.IsNullOrWhiteSpace(channel.TvgId)
             ? "Not available"
             : channel.TvgId;
-        SelectedChannelUrlTextBlock.Text = channel.StreamUri.ToString();
+        SelectedChannelUrlTextBox.Text = channel.StreamUri.ToString();
         SelectedChannelLogoImage.Source = CreateLogoSource(channel.LogoSource);
         ToggleFavoriteButton.IsEnabled = true;
         ToggleFavoriteButton.Content = channel.IsFavorite ? "Remove Favorite" : "Add Favorite";
@@ -515,17 +520,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private string FormatDefaultGroups()
+    private string FormatDefaultGroup()
     {
-        if (_defaultGroups.Count == 0)
-        {
-            return "All groups";
-        }
-
-        var groups = _defaultGroups.OrderBy(group => group, StringComparer.CurrentCultureIgnoreCase).ToList();
-        return groups.Count <= 3
-            ? string.Join(", ", groups)
-            : $"{string.Join(", ", groups.Take(3))} +{groups.Count - 3} more";
+        return string.IsNullOrWhiteSpace(_defaultGroup) ? "All groups" : _defaultGroup;
     }
 
     private void SetLoadingState(bool isLoading)
@@ -628,11 +625,6 @@ public partial class MainWindow : Window
         ApplyChannelFilter(selectFirstChannel: false);
     }
 
-    private void ApplyDefaultGroupsCheckBox_Click(object sender, RoutedEventArgs e)
-    {
-        ApplyChannelFilter(selectFirstChannel: false);
-    }
-
     protected override void OnClosed(EventArgs e)
     {
         _logoWarmupCts?.Cancel();
@@ -642,3 +634,4 @@ public partial class MainWindow : Window
         base.OnClosed(e);
     }
 }
+

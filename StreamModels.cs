@@ -65,9 +65,7 @@ public sealed class SchmubeAppConfig
 {
     public string SubscriptionUrl { get; set; } = string.Empty;
 
-    public List<string> DefaultGroups { get; set; } = [];
-
-    public bool ApplyDefaultGroupsOnLoad { get; set; }
+    public string DefaultGroup { get; set; } = string.Empty;
 
     public bool AutoLoadOnStartup { get; set; } = true;
 }
