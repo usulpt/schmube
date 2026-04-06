@@ -20,12 +20,46 @@ public sealed class PlaylistService
 
     public static bool IsXtreamPlaylistUri(Uri uri)
     {
-        return TryParseXtreamConnection(uri, out _);
+        return TryGetXtreamConnection(uri, out _);
+    }
+
+    public static bool TryGetXtreamConnection(Uri uri, out XtreamConnectionInfo? connection)
+    {
+        connection = null;
+
+        if (!string.Equals(Path.GetFileName(uri.AbsolutePath), "get.php", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var query = ParseQueryString(uri.Query);
+        if (!query.TryGetValue("username", out var username) || string.IsNullOrWhiteSpace(username))
+        {
+            return false;
+        }
+
+        if (!query.TryGetValue("password", out var password) || string.IsNullOrWhiteSpace(password))
+        {
+            return false;
+        }
+
+        var outputFormat = query.TryGetValue("output", out var output) && !string.IsNullOrWhiteSpace(output)
+            ? output
+            : "ts";
+
+        var baseAddressBuilder = new UriBuilder(uri.Scheme, uri.Host)
+        {
+            Port = uri.IsDefaultPort ? -1 : uri.Port,
+            Path = "/"
+        };
+
+        connection = new XtreamConnectionInfo(baseAddressBuilder.Uri, username, password, outputFormat);
+        return true;
     }
 
     public async Task<IReadOnlyList<PlaylistChannel>> LoadChannelsAsync(Uri sourceUri, string userAgent, string referer, CancellationToken cancellationToken = default)
     {
-        if (TryParseXtreamConnection(sourceUri, out var connection) && connection is not null)
+        if (TryGetXtreamConnection(sourceUri, out var connection) && connection is not null)
         {
             return await LoadXtreamChannelsAsync(connection, userAgent, referer, cancellationToken);
         }
@@ -39,7 +73,7 @@ public sealed class PlaylistService
         return ParsePlaylist(playlistUri, content);
     }
 
-    private async Task<IReadOnlyList<PlaylistChannel>> LoadXtreamChannelsAsync(XtreamConnection connection, string userAgent, string referer, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<PlaylistChannel>> LoadXtreamChannelsAsync(XtreamConnectionInfo connection, string userAgent, string referer, CancellationToken cancellationToken)
     {
         var categoriesUri = new Uri(connection.BaseAddress, $"player_api.php?username={Uri.EscapeDataString(connection.Username)}&password={Uri.EscapeDataString(connection.Password)}&action=get_live_categories");
         var streamsUri = new Uri(connection.BaseAddress, $"player_api.php?username={Uri.EscapeDataString(connection.Username)}&password={Uri.EscapeDataString(connection.Password)}&action=get_live_streams");
@@ -107,12 +141,15 @@ public sealed class PlaylistService
                 continue;
             }
 
+            var logo = currentMetadata?.TvgLogo ?? string.Empty;
+
             channels.Add(new PlaylistChannel
             {
                 Name = string.IsNullOrWhiteSpace(currentMetadata?.Name) ? BuildChannelName(streamUri) : currentMetadata.Name,
                 GroupTitle = currentMetadata?.GroupTitle ?? string.Empty,
                 TvgId = currentMetadata?.TvgId ?? string.Empty,
-                TvgLogo = currentMetadata?.TvgLogo ?? string.Empty,
+                TvgLogo = logo,
+                LogoSource = logo,
                 StreamUri = streamUri
             });
 
@@ -179,7 +216,7 @@ public sealed class PlaylistService
         return categories;
     }
 
-    private static IReadOnlyList<PlaylistChannel> ParseXtreamStreams(string json, IReadOnlyDictionary<string, string> categories, XtreamConnection connection)
+    private static IReadOnlyList<PlaylistChannel> ParseXtreamStreams(string json, IReadOnlyDictionary<string, string> categories, XtreamConnectionInfo connection)
     {
         var channels = new List<PlaylistChannel>();
 
@@ -210,7 +247,9 @@ public sealed class PlaylistService
                 GroupTitle = categoryName ?? string.Empty,
                 TvgId = tvgId,
                 TvgLogo = streamIcon,
-                StreamUri = BuildXtreamLiveUri(connection, streamId)
+                LogoSource = streamIcon,
+                StreamUri = BuildXtreamLiveUri(connection, streamId),
+                StreamId = streamId
             });
         }
 
@@ -234,44 +273,10 @@ public sealed class PlaylistService
         };
     }
 
-    private static Uri BuildXtreamLiveUri(XtreamConnection connection, int streamId)
+    private static Uri BuildXtreamLiveUri(XtreamConnectionInfo connection, int streamId)
     {
         var path = $"live/{Uri.EscapeDataString(connection.Username)}/{Uri.EscapeDataString(connection.Password)}/{streamId}.{connection.OutputFormat}";
         return new Uri(connection.BaseAddress, path);
-    }
-
-    private static bool TryParseXtreamConnection(Uri uri, out XtreamConnection? connection)
-    {
-        connection = null;
-
-        if (!string.Equals(Path.GetFileName(uri.AbsolutePath), "get.php", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var query = ParseQueryString(uri.Query);
-        if (!query.TryGetValue("username", out var username) || string.IsNullOrWhiteSpace(username))
-        {
-            return false;
-        }
-
-        if (!query.TryGetValue("password", out var password) || string.IsNullOrWhiteSpace(password))
-        {
-            return false;
-        }
-
-        var outputFormat = query.TryGetValue("output", out var output) && !string.IsNullOrWhiteSpace(output)
-            ? output
-            : "ts";
-
-        var baseAddressBuilder = new UriBuilder(uri.Scheme, uri.Host)
-        {
-            Port = uri.IsDefaultPort ? -1 : uri.Port,
-            Path = "/"
-        };
-
-        connection = new XtreamConnection(baseAddressBuilder.Uri, username, password, outputFormat);
-        return true;
     }
 
     private static Dictionary<string, string> ParseQueryString(string query)
@@ -316,6 +321,4 @@ public sealed class PlaylistService
 
         public string TvgLogo { get; init; } = string.Empty;
     }
-
-    private sealed record XtreamConnection(Uri BaseAddress, string Username, string Password, string OutputFormat);
 }

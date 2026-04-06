@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace Schmube;
 
@@ -49,7 +48,11 @@ public sealed class PlaylistChannel
 
     public string TvgLogo { get; init; } = string.Empty;
 
+    public string LogoSource { get; set; } = string.Empty;
+
     public required Uri StreamUri { get; init; }
+
+    public int? StreamId { get; init; }
 
     public bool IsFavorite { get; set; }
 
@@ -67,4 +70,36 @@ public sealed class SchmubeAppConfig
     public bool ApplyDefaultGroupsOnLoad { get; set; }
 
     public bool AutoLoadOnStartup { get; set; } = true;
+}
+
+public sealed class XtreamConnectionInfo
+{
+    public XtreamConnectionInfo(Uri baseAddress, string username, string password, string outputFormat)
+    {
+        BaseAddress = baseAddress;
+        Username = username;
+        Password = password;
+        OutputFormat = outputFormat;
+    }
+
+    public Uri BaseAddress { get; }
+
+    public string Username { get; }
+
+    public string Password { get; }
+
+    public string OutputFormat { get; }
+}
+
+public sealed class ProgramGuideEntry
+{
+    public required string Title { get; init; }
+
+    public string Description { get; init; } = string.Empty;
+
+    public DateTime StartLocal { get; init; }
+
+    public DateTime EndLocal { get; init; }
+
+    public string TimeRange => $"{StartLocal:ddd HH:mm} - {EndLocal:HH:mm}";
 }

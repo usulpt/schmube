@@ -1,1 +1,3 @@
 schmube.config.json
+bin/**/*
+obj/**/*

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -18,13 +19,18 @@ public partial class MainWindow : Window
     private readonly SettingsStore _settingsStore = new();
     private readonly AppConfigStore _appConfigStore = new();
     private readonly PlaylistService _playlistService = new();
+    private readonly LogoCacheService _logoCacheService = new();
+    private readonly EpgService _epgService = new();
     private readonly List<PlaylistChannel> _allChannels = [];
     private readonly ObservableCollection<PlaylistChannel> _visibleChannels = [];
     private readonly ObservableCollection<string> _groupOptions = [AllGroupsLabel];
+    private readonly ObservableCollection<ProgramGuideEntry> _programGuideEntries = [];
     private readonly HashSet<string> _favoriteChannelKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _defaultGroups = new(StringComparer.CurrentCultureIgnoreCase);
 
     private readonly SchmubeAppConfig _appConfig;
+    private CancellationTokenSource? _logoWarmupCts;
+    private CancellationTokenSource? _epgLoadCts;
     private bool _autoLoadAttempted;
     private PlayerWindow? _playerWindow;
 
@@ -37,10 +43,12 @@ public partial class MainWindow : Window
         ChannelsListView.ItemsSource = _visibleChannels;
         GroupFilterComboBox.ItemsSource = _groupOptions;
         GroupFilterComboBox.SelectedIndex = 0;
+        ProgramGuideListBox.ItemsSource = _programGuideEntries;
         Loaded += MainWindow_Loaded;
 
         LoadSettings();
         UpdateChannelSummary();
+        ClearProgramGuide("Select a channel to load the guide.");
         UpdateSelectedChannelDetails(null);
     }
 
@@ -205,8 +213,9 @@ public partial class MainWindow : Window
 
         try
         {
-            var channels = await _playlistService.LoadChannelsAsync(playlistUri, settings.UserAgent, settings.Referer);
+            var channels = (await _playlistService.LoadChannelsAsync(playlistUri, settings.UserAgent, settings.Referer)).ToList();
             ApplyFavoriteStates(channels);
+            _logoCacheService.RefreshResolvedLogoSources(channels);
 
             _allChannels.Clear();
             _allChannels.AddRange(channels
@@ -215,6 +224,7 @@ public partial class MainWindow : Window
 
             RefreshGroupOptions();
             ApplyChannelFilter(selectFirstChannel: true);
+            StartLogoWarmup(channels);
             StatusTextBlock.Text = _allChannels.Count == 0
                 ? "Channel source loaded, but no playable channels were found."
                 : $"Loaded {_allChannels.Count} channels.";
@@ -224,6 +234,7 @@ public partial class MainWindow : Window
             _allChannels.Clear();
             _visibleChannels.Clear();
             RefreshGroupOptions();
+            ClearProgramGuide("Select a channel to load the guide.");
             UpdateSelectedChannelDetails(null);
             UpdateChannelSummary();
             StatusTextBlock.Text = $"Channel load failed: {ex.Message}";
@@ -240,6 +251,115 @@ public partial class MainWindow : Window
         {
             channel.IsFavorite = _favoriteChannelKeys.Contains(channel.FavoriteKey);
         }
+    }
+
+    private void StartLogoWarmup(IReadOnlyList<PlaylistChannel> channels)
+    {
+        _logoWarmupCts?.Cancel();
+        _logoWarmupCts = new CancellationTokenSource();
+        var token = _logoWarmupCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _logoCacheService.WarmCacheAsync(channels.OrderByDescending(channel => channel.IsFavorite), 200, token);
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    _logoCacheService.RefreshResolvedLogoSources(channels);
+                    ChannelsListView.Items.Refresh();
+                    if (SelectedChannel is not null)
+                    {
+                        UpdateSelectedChannelDetails(SelectedChannel);
+                    }
+                });
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch
+            {
+            }
+        }, token);
+    }
+
+    private async Task EnsureSelectedLogoCachedAsync(PlaylistChannel? channel)
+    {
+        if (channel is null || string.IsNullOrWhiteSpace(channel.TvgLogo))
+        {
+            return;
+        }
+
+        try
+        {
+            await _logoCacheService.EnsureChannelLogoAsync(channel);
+            ChannelsListView.Items.Refresh();
+            if (ReferenceEquals(SelectedChannel, channel))
+            {
+                UpdateSelectedChannelDetails(channel);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task LoadProgramGuideAsync(PlaylistChannel? channel)
+    {
+        _epgLoadCts?.Cancel();
+        _epgLoadCts = null;
+
+        if (channel is null)
+        {
+            ClearProgramGuide("Select a channel to load the guide.");
+            return;
+        }
+
+        if (channel.StreamId is null || !TryGetConfiguredUri(out var sourceUri) || sourceUri is null || !PlaylistService.TryGetXtreamConnection(sourceUri, out var connection) || connection is null)
+        {
+            ClearProgramGuide("EPG unavailable for this source.");
+            return;
+        }
+
+        var settings = CollectSettingsFromUi();
+        var cts = new CancellationTokenSource();
+        _epgLoadCts = cts;
+        ProgramGuideStatusTextBlock.Text = "Loading program guide...";
+
+        try
+        {
+            var entries = await _epgService.LoadShortGuideAsync(connection, channel.StreamId.Value, settings.UserAgent, settings.Referer, cts.Token);
+            if (!ReferenceEquals(_epgLoadCts, cts))
+            {
+                return;
+            }
+
+            _programGuideEntries.Clear();
+            foreach (var entry in entries)
+            {
+                _programGuideEntries.Add(entry);
+            }
+
+            ProgramGuideStatusTextBlock.Text = entries.Count == 0
+                ? "No guide data available."
+                : $"{entries.Count} upcoming programs.";
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            if (ReferenceEquals(_epgLoadCts, cts))
+            {
+                ClearProgramGuide($"EPG load failed: {ex.Message}");
+            }
+        }
+    }
+
+    private void ClearProgramGuide(string message)
+    {
+        _programGuideEntries.Clear();
+        ProgramGuideStatusTextBlock.Text = message;
     }
 
     private void RefreshGroupOptions()
@@ -301,6 +421,7 @@ public partial class MainWindow : Window
         if (ChannelsListView.SelectedItem is null)
         {
             UpdateSelectedChannelDetails(null);
+            ClearProgramGuide("Select a channel to load the guide.");
         }
 
         UpdateChannelSummary();
@@ -372,14 +493,14 @@ public partial class MainWindow : Window
             ? "Not available"
             : channel.TvgId;
         SelectedChannelUrlTextBlock.Text = channel.StreamUri.ToString();
-        SelectedChannelLogoImage.Source = CreateLogoSource(channel.TvgLogo);
+        SelectedChannelLogoImage.Source = CreateLogoSource(channel.LogoSource);
         ToggleFavoriteButton.IsEnabled = true;
         ToggleFavoriteButton.Content = channel.IsFavorite ? "Remove Favorite" : "Add Favorite";
     }
 
-    private static ImageSource? CreateLogoSource(string logoUrl)
+    private static ImageSource? CreateLogoSource(string logoSource)
     {
-        if (!Uri.TryCreate(logoUrl, UriKind.Absolute, out var uri))
+        if (!Uri.TryCreate(logoSource, UriKind.Absolute, out var uri))
         {
             return null;
         }
@@ -440,7 +561,10 @@ public partial class MainWindow : Window
 
         _settingsStore.Save(CollectSettingsFromUi());
         ApplyChannelFilter(selectFirstChannel: false);
-        UpdateSelectedChannelDetails(SelectedChannel);
+        if (SelectedChannel is not null)
+        {
+            UpdateSelectedChannelDetails(SelectedChannel);
+        }
     }
 
     private void OpenPlayerButton_Click(object sender, RoutedEventArgs e)
@@ -481,9 +605,12 @@ public partial class MainWindow : Window
         await PlaySelectedChannelAsync();
     }
 
-    private void ChannelsListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void ChannelsListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        UpdateSelectedChannelDetails(SelectedChannel);
+        var selectedChannel = SelectedChannel;
+        UpdateSelectedChannelDetails(selectedChannel);
+        await EnsureSelectedLogoCachedAsync(selectedChannel);
+        await LoadProgramGuideAsync(selectedChannel);
     }
 
     private void ChannelSearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -508,6 +635,8 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _logoWarmupCts?.Cancel();
+        _epgLoadCts?.Cancel();
         _settingsStore.Save(CollectSettingsFromUi());
         _playerWindow?.Close();
         base.OnClosed(e);
