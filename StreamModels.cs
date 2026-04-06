@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
 
 namespace Schmube;
 
@@ -7,39 +9,42 @@ public sealed class StreamSettings
 {
     public string StreamUrl { get; set; } = string.Empty;
 
-    public string UserAgent { get; set; } = string.Empty;
-
-    public string Referer { get; set; } = string.Empty;
-
     public bool KeepPlayerOnTop { get; set; }
 
     public List<string> FavoriteChannelKeys { get; set; } = [];
+
+    public List<string> RecentChannelKeys { get; set; } = [];
+
+    public string LastChannelKey { get; set; } = string.Empty;
 }
 
 public sealed class PlaybackRequest
 {
-    public PlaybackRequest(Uri streamUri, string userAgent, string referer, bool keepPlayerOnTop, string displayName)
+    public PlaybackRequest(Uri streamUri, bool keepPlayerOnTop, string displayName, bool allowReconnect)
     {
         StreamUri = streamUri;
-        UserAgent = userAgent;
-        Referer = referer;
         KeepPlayerOnTop = keepPlayerOnTop;
         DisplayName = displayName;
+        AllowReconnect = allowReconnect;
     }
 
     public Uri StreamUri { get; }
 
-    public string UserAgent { get; }
-
-    public string Referer { get; }
-
     public bool KeepPlayerOnTop { get; }
 
     public string DisplayName { get; }
+
+    public bool AllowReconnect { get; }
 }
 
-public sealed class PlaylistChannel
+public sealed class PlaylistChannel : INotifyPropertyChanged
 {
+    private string _logoSource = string.Empty;
+    private bool _isFavorite;
+    private int _recentRank = -1;
+    private string _nowTitle = string.Empty;
+    private string _nextTitle = string.Empty;
+
     public required string Name { get; init; }
 
     public string GroupTitle { get; init; } = string.Empty;
@@ -48,17 +53,76 @@ public sealed class PlaylistChannel
 
     public string TvgLogo { get; init; } = string.Empty;
 
-    public string LogoSource { get; set; } = string.Empty;
+    public string LogoSource
+    {
+        get => _logoSource;
+        set => SetField(ref _logoSource, value);
+    }
 
     public required Uri StreamUri { get; init; }
 
     public int? StreamId { get; init; }
 
-    public bool IsFavorite { get; set; }
+    public bool IsFavorite
+    {
+        get => _isFavorite;
+        set
+        {
+            if (SetField(ref _isFavorite, value))
+            {
+                OnPropertyChanged(nameof(FavoriteMarker));
+            }
+        }
+    }
+
+    public int RecentRank
+    {
+        get => _recentRank;
+        set
+        {
+            if (SetField(ref _recentRank, value))
+            {
+                OnPropertyChanged(nameof(RecentMarker));
+            }
+        }
+    }
+
+    public string NowTitle
+    {
+        get => _nowTitle;
+        set => SetField(ref _nowTitle, value);
+    }
+
+    public string NextTitle
+    {
+        get => _nextTitle;
+        set => SetField(ref _nextTitle, value);
+    }
 
     public string FavoriteKey => string.IsNullOrWhiteSpace(TvgId) ? StreamUri.ToString() : TvgId;
 
     public string FavoriteMarker => IsFavorite ? "*" : string.Empty;
+
+    public string RecentMarker => RecentRank >= 0 ? "R" : string.Empty;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private bool SetField<T>(ref T field, T value, [CallerMemberName] string propertyName = "")
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value))
+        {
+            return false;
+        }
+
+        field = value;
+        OnPropertyChanged(propertyName);
+        return true;
+    }
+
+    private void OnPropertyChanged([CallerMemberName] string propertyName = "")
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
 }
 
 public sealed class SchmubeAppConfig

@@ -15,6 +15,9 @@ namespace Schmube;
 public partial class MainWindow : Window
 {
     private const string AllGroupsLabel = "All groups";
+    private const string DefaultHintText = "Focus a control to see what it does.";
+    private const int RecentChannelLimit = 12;
+    private const int GuideWarmupLimit = 18;
 
     private readonly SettingsStore _settingsStore = new();
     private readonly AppConfigStore _appConfigStore = new();
@@ -26,12 +29,18 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<string> _groupOptions = [AllGroupsLabel];
     private readonly ObservableCollection<ProgramGuideEntry> _programGuideEntries = [];
     private readonly HashSet<string> _favoriteChannelKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<string> _recentChannelKeys = [];
+    private readonly Dictionary<int, IReadOnlyList<ProgramGuideEntry>> _guideCache = [];
 
     private readonly SchmubeAppConfig _appConfig;
     private CancellationTokenSource? _logoWarmupCts;
     private CancellationTokenSource? _epgLoadCts;
+    private CancellationTokenSource? _guideWarmupCts;
     private bool _autoLoadAttempted;
     private string _defaultGroup = string.Empty;
+    private string _lastPlayedChannelKey = string.Empty;
+    private string _pendingSelectionChannelKey = string.Empty;
+    private XtreamConnectionInfo? _currentXtreamConnection;
     private PlayerWindow? _playerWindow;
 
     public MainWindow()
@@ -46,6 +55,8 @@ public partial class MainWindow : Window
         ProgramGuideListBox.ItemsSource = _programGuideEntries;
         Loaded += MainWindow_Loaded;
 
+        RegisterFocusHints();
+        SetHintText(DefaultHintText);
         LoadSettings();
         UpdateChannelSummary();
         ClearProgramGuide("Select a channel to load the guide.");
@@ -53,6 +64,34 @@ public partial class MainWindow : Window
     }
 
     private PlaylistChannel? SelectedChannel => ChannelsListView.SelectedItem as PlaylistChannel;
+
+    private void RegisterFocusHints()
+    {
+        RegisterFocusHint(StreamUrlTextBox, "Source URL for your playlist or direct stream. Paste it here or keep using the saved config value.");
+        RegisterFocusHint(KeepOnTopCheckBox, "Keep the separate player window above your other apps while you watch.");
+        RegisterFocusHint(ChannelSearchTextBox, "Filter the loaded channels by name, group, channel ID, or the live guide preview.");
+        RegisterFocusHint(GroupFilterComboBox, "Limit the channel list to one group after the playlist finishes loading.");
+        RegisterFocusHint(FavoritesOnlyCheckBox, "Show only channels you have marked as favorites.");
+        RegisterFocusHint(RecentOnlyCheckBox, "Show only channels you played recently.");
+        RegisterFocusHint(LoadChannelsButton, "Load or refresh the channel list from the configured source.");
+        RegisterFocusHint(PlaySelectedButton, "Start playback for the channel currently selected in the list.");
+        RegisterFocusHint(PlayUrlButton, "Play the raw URL directly when it points to a single stream rather than a playlist account.");
+        RegisterFocusHint(OpenPlayerButton, "Open the separate resizable player window without changing the current stream.");
+        RegisterFocusHint(StopPlaybackButton, "Stop playback in the player window.");
+        RegisterFocusHint(SaveSettingsButton, "Persist the current URL, favorites, recents, and playback window setting locally.");
+        RegisterFocusHint(ChannelsListView, "Browse channels here. Single-click selects a channel and double-click starts playback.");
+        RegisterFocusHint(ToggleFavoriteButton, "Add or remove the selected channel from your favorites list.");
+    }
+
+    private void RegisterFocusHint(Control control, string hint)
+    {
+        control.GotKeyboardFocus += (_, _) => SetHintText(hint);
+    }
+
+    private void SetHintText(string hint)
+    {
+        HintTextBlock.Text = string.IsNullOrWhiteSpace(hint) ? DefaultHintText : hint;
+    }
 
     private void LoadSettings()
     {
@@ -64,15 +103,25 @@ public partial class MainWindow : Window
             _favoriteChannelKeys.Add(key);
         }
 
+        _recentChannelKeys.Clear();
+        foreach (var key in settings.RecentChannelKeys
+                     .Where(key => !string.IsNullOrWhiteSpace(key))
+                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                     .Take(RecentChannelLimit))
+        {
+            _recentChannelKeys.Add(key);
+        }
+
+        _lastPlayedChannelKey = settings.LastChannelKey?.Trim() ?? string.Empty;
+        _pendingSelectionChannelKey = _lastPlayedChannelKey;
         _defaultGroup = _appConfig.DefaultGroup?.Trim() ?? string.Empty;
 
         StreamUrlTextBox.Text = !string.IsNullOrWhiteSpace(_appConfig.SubscriptionUrl)
             ? _appConfig.SubscriptionUrl
             : settings.StreamUrl;
-        UserAgentTextBox.Text = settings.UserAgent;
-        RefererTextBox.Text = settings.Referer;
         KeepOnTopCheckBox.IsChecked = settings.KeepPlayerOnTop;
         FavoritesOnlyCheckBox.IsChecked = false;
+        RecentOnlyCheckBox.IsChecked = false;
         ConfiguredDefaultTextBox.Text = FormatDefaultGroup();
     }
 
@@ -92,10 +141,10 @@ public partial class MainWindow : Window
         return new StreamSettings
         {
             StreamUrl = StreamUrlTextBox.Text.Trim(),
-            UserAgent = UserAgentTextBox.Text.Trim(),
-            Referer = RefererTextBox.Text.Trim(),
             KeepPlayerOnTop = KeepOnTopCheckBox.IsChecked == true,
-            FavoriteChannelKeys = _favoriteChannelKeys.OrderBy(key => key, StringComparer.OrdinalIgnoreCase).ToList()
+            FavoriteChannelKeys = _favoriteChannelKeys.OrderBy(key => key, StringComparer.OrdinalIgnoreCase).ToList(),
+            RecentChannelKeys = _recentChannelKeys.ToList(),
+            LastChannelKey = _lastPlayedChannelKey
         };
     }
 
@@ -114,10 +163,10 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private PlaybackRequest BuildPlaybackRequest(Uri streamUri, string displayName)
+    private PlaybackRequest BuildPlaybackRequest(Uri streamUri, string displayName, bool allowReconnect)
     {
         var settings = CollectSettingsFromUi();
-        return new PlaybackRequest(streamUri, settings.UserAgent, settings.Referer, settings.KeepPlayerOnTop, displayName);
+        return new PlaybackRequest(streamUri, settings.KeepPlayerOnTop, displayName, allowReconnect);
     }
 
     private bool TryBuildDirectRequest(out PlaybackRequest? request)
@@ -136,7 +185,7 @@ public partial class MainWindow : Window
         }
 
         _settingsStore.Save(CollectSettingsFromUi());
-        request = BuildPlaybackRequest(streamUri, BuildDisplayName(streamUri));
+        request = BuildPlaybackRequest(streamUri, BuildDisplayName(streamUri), allowReconnect: false);
         return true;
     }
 
@@ -164,31 +213,36 @@ public partial class MainWindow : Window
         return _playerWindow;
     }
 
-    private async Task PlayRequestAsync(PlaybackRequest request, string successMessage)
+    private async Task<bool> PlayRequestAsync(PlaybackRequest request, string successMessage)
     {
         try
         {
             var playerWindow = EnsurePlayerWindow(true);
             await playerWindow.PlayAsync(request);
             StatusTextBlock.Text = successMessage;
+            return true;
         }
         catch (Exception ex)
         {
             StatusTextBlock.Text = $"Playback error: {ex.Message}";
+            return false;
         }
     }
 
     private async Task PlaySelectedChannelAsync()
     {
-        if (SelectedChannel is null)
+        var selectedChannel = SelectedChannel;
+        if (selectedChannel is null)
         {
             StatusTextBlock.Text = "Select a channel from the list first.";
             return;
         }
 
-        _settingsStore.Save(CollectSettingsFromUi());
-        var request = BuildPlaybackRequest(SelectedChannel.StreamUri, SelectedChannel.Name);
-        await PlayRequestAsync(request, $"Playing {SelectedChannel.Name}.");
+        var request = BuildPlaybackRequest(selectedChannel.StreamUri, selectedChannel.Name, allowReconnect: true);
+        if (await PlayRequestAsync(request, $"Playing {selectedChannel.Name}."))
+        {
+            RememberPlayedChannel(selectedChannel);
+        }
     }
 
     private async void LoadChannelsButton_Click(object sender, RoutedEventArgs e)
@@ -198,17 +252,21 @@ public partial class MainWindow : Window
             return;
         }
 
-        var settings = CollectSettingsFromUi();
-        _settingsStore.Save(settings);
+        _settingsStore.Save(CollectSettingsFromUi());
         SetLoadingState(true);
-        StatusTextBlock.Text = PlaylistService.IsXtreamPlaylistUri(playlistUri)
+        CancelGuideWarmup();
+        _guideCache.Clear();
+        _currentXtreamConnection = PlaylistService.TryGetXtreamConnection(playlistUri, out var connection) ? connection : null;
+        _pendingSelectionChannelKey = _lastPlayedChannelKey;
+        StatusTextBlock.Text = _currentXtreamConnection is not null
             ? "Loading channels via Xtream API..."
             : "Loading playlist...";
 
         try
         {
-            var channels = (await _playlistService.LoadChannelsAsync(playlistUri, settings.UserAgent, settings.Referer)).ToList();
+            var channels = (await _playlistService.LoadChannelsAsync(playlistUri)).ToList();
             ApplyFavoriteStates(channels);
+            ApplyRecentStates(channels);
             _logoCacheService.RefreshResolvedLogoSources(channels);
 
             _allChannels.Clear();
@@ -220,14 +278,19 @@ public partial class MainWindow : Window
             SelectDefaultGroupIfAvailable();
             ApplyChannelFilter(selectFirstChannel: true);
             StartLogoWarmup(channels);
+
             StatusTextBlock.Text = _allChannels.Count == 0
                 ? "Channel source loaded, but no playable channels were found."
-                : $"Loaded {_allChannels.Count} channels.";
+                : string.IsNullOrWhiteSpace(_lastPlayedChannelKey)
+                    ? $"Loaded {_allChannels.Count} channels."
+                    : $"Loaded {_allChannels.Count} channels. Last played channel will be reselected when available.";
         }
         catch (Exception ex)
         {
             _allChannels.Clear();
             _visibleChannels.Clear();
+            _currentXtreamConnection = null;
+            _guideCache.Clear();
             RefreshGroupOptions();
             ClearProgramGuide("Select a channel to load the guide.");
             UpdateSelectedChannelDetails(null);
@@ -248,6 +311,34 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ApplyRecentStates(IEnumerable<PlaylistChannel> channels)
+    {
+        var recentLookup = _recentChannelKeys
+            .Select((key, index) => new { key, index })
+            .ToDictionary(item => item.key, item => item.index, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var channel in channels)
+        {
+            channel.RecentRank = recentLookup.TryGetValue(channel.FavoriteKey, out var index) ? index : -1;
+        }
+    }
+
+    private void RememberPlayedChannel(PlaylistChannel channel)
+    {
+        _lastPlayedChannelKey = channel.FavoriteKey;
+        _recentChannelKeys.RemoveAll(key => string.Equals(key, _lastPlayedChannelKey, StringComparison.OrdinalIgnoreCase));
+        _recentChannelKeys.Insert(0, _lastPlayedChannelKey);
+
+        if (_recentChannelKeys.Count > RecentChannelLimit)
+        {
+            _recentChannelKeys.RemoveRange(RecentChannelLimit, _recentChannelKeys.Count - RecentChannelLimit);
+        }
+
+        ApplyRecentStates(_allChannels);
+        UpdateSelectedChannelDetails(channel);
+        _settingsStore.Save(CollectSettingsFromUi());
+    }
+
     private void StartLogoWarmup(IReadOnlyList<PlaylistChannel> channels)
     {
         _logoWarmupCts?.Cancel();
@@ -262,7 +353,6 @@ public partial class MainWindow : Window
                 await Dispatcher.InvokeAsync(() =>
                 {
                     _logoCacheService.RefreshResolvedLogoSources(channels);
-                    ChannelsListView.Items.Refresh();
                     if (SelectedChannel is not null)
                     {
                         UpdateSelectedChannelDetails(SelectedChannel);
@@ -288,7 +378,6 @@ public partial class MainWindow : Window
         try
         {
             await _logoCacheService.EnsureChannelLogoAsync(channel);
-            ChannelsListView.Items.Refresh();
             if (ReferenceEquals(SelectedChannel, channel))
             {
                 UpdateSelectedChannelDetails(channel);
@@ -297,6 +386,77 @@ public partial class MainWindow : Window
         catch
         {
         }
+    }
+
+    private void StartGuideWarmupForVisibleChannels()
+    {
+        CancelGuideWarmup();
+
+        if (_currentXtreamConnection is null)
+        {
+            return;
+        }
+
+        var visibleCandidates = _visibleChannels
+            .Where(channel => channel.StreamId is not null)
+            .Take(GuideWarmupLimit)
+            .ToList();
+
+        foreach (var channel in visibleCandidates)
+        {
+            if (channel.StreamId is int streamId && _guideCache.TryGetValue(streamId, out var cachedEntries))
+            {
+                ApplyGuidePreview(channel, cachedEntries);
+            }
+        }
+
+        var uncachedCandidates = visibleCandidates
+            .Where(channel => channel.StreamId is int streamId && !_guideCache.ContainsKey(streamId))
+            .ToList();
+
+        if (uncachedCandidates.Count == 0)
+        {
+            return;
+        }
+
+        var connection = _currentXtreamConnection;
+        var cts = new CancellationTokenSource();
+        _guideWarmupCts = cts;
+
+        _ = Task.Run(async () =>
+        {
+            foreach (var channel in uncachedCandidates)
+            {
+                try
+                {
+                    cts.Token.ThrowIfCancellationRequested();
+
+                    if (channel.StreamId is not int streamId)
+                    {
+                        continue;
+                    }
+
+                    var entries = await _epgService.LoadShortGuideAsync(connection, streamId, cts.Token);
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        if (cts.IsCancellationRequested || channel.StreamId is not int confirmedStreamId)
+                        {
+                            return;
+                        }
+
+                        _guideCache[confirmedStreamId] = entries;
+                        ApplyGuidePreview(channel, entries);
+                    });
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch
+                {
+                }
+            }
+        }, cts.Token);
     }
 
     private async Task LoadProgramGuideAsync(PlaylistChannel? channel)
@@ -310,34 +470,34 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (channel.StreamId is null || !TryGetConfiguredUri(out var sourceUri) || sourceUri is null || !PlaylistService.TryGetXtreamConnection(sourceUri, out var connection) || connection is null)
+        if (channel.StreamId is not int streamId || _currentXtreamConnection is null)
         {
             ClearProgramGuide("EPG unavailable for this source.");
             return;
         }
 
-        var settings = CollectSettingsFromUi();
+        if (_guideCache.TryGetValue(streamId, out var cachedEntries))
+        {
+            ApplyGuidePreview(channel, cachedEntries);
+            PopulateProgramGuide(cachedEntries);
+            return;
+        }
+
         var cts = new CancellationTokenSource();
         _epgLoadCts = cts;
         ProgramGuideStatusTextBox.Text = "Loading program guide...";
 
         try
         {
-            var entries = await _epgService.LoadShortGuideAsync(connection, channel.StreamId.Value, settings.UserAgent, settings.Referer, cts.Token);
+            var entries = await _epgService.LoadShortGuideAsync(_currentXtreamConnection, streamId, cts.Token);
             if (!ReferenceEquals(_epgLoadCts, cts))
             {
                 return;
             }
 
-            _programGuideEntries.Clear();
-            foreach (var entry in entries)
-            {
-                _programGuideEntries.Add(entry);
-            }
-
-            ProgramGuideStatusTextBox.Text = entries.Count == 0
-                ? "No guide data available."
-                : $"{entries.Count} upcoming programs.";
+            _guideCache[streamId] = entries;
+            ApplyGuidePreview(channel, entries);
+            PopulateProgramGuide(entries);
         }
         catch (OperationCanceledException)
         {
@@ -349,6 +509,43 @@ public partial class MainWindow : Window
                 ClearProgramGuide($"EPG load failed: {ex.Message}");
             }
         }
+    }
+
+    private void PopulateProgramGuide(IReadOnlyList<ProgramGuideEntry> entries)
+    {
+        _programGuideEntries.Clear();
+        foreach (var entry in entries.OrderBy(entry => entry.StartLocal))
+        {
+            _programGuideEntries.Add(entry);
+        }
+
+        ProgramGuideStatusTextBox.Text = entries.Count == 0
+            ? "No guide data available."
+            : $"{entries.Count} upcoming programs.";
+    }
+
+    private void ApplyGuidePreview(PlaylistChannel channel, IReadOnlyList<ProgramGuideEntry> entries)
+    {
+        if (entries.Count == 0)
+        {
+            channel.NowTitle = string.Empty;
+            channel.NextTitle = string.Empty;
+            return;
+        }
+
+        var orderedEntries = entries.OrderBy(entry => entry.StartLocal).ToList();
+        var now = DateTime.Now;
+        var currentEntry = orderedEntries.FirstOrDefault(entry => entry.StartLocal <= now && now < entry.EndLocal)
+            ?? orderedEntries.FirstOrDefault(entry => entry.EndLocal > now)
+            ?? orderedEntries[0];
+
+        var currentIndex = orderedEntries.IndexOf(currentEntry);
+        var nextEntry = currentIndex >= 0 && currentIndex + 1 < orderedEntries.Count
+            ? orderedEntries[currentIndex + 1]
+            : null;
+
+        channel.NowTitle = currentEntry is null ? string.Empty : $"{currentEntry.StartLocal:HH:mm} {currentEntry.Title}";
+        channel.NextTitle = nextEntry is null ? string.Empty : $"{nextEntry.StartLocal:HH:mm} {nextEntry.Title}";
     }
 
     private void ClearProgramGuide(string message)
@@ -392,15 +589,19 @@ public partial class MainWindow : Window
     private void ApplyChannelFilter(bool selectFirstChannel)
     {
         var selectedStream = SelectedChannel?.StreamUri.ToString();
+        var preferredChannelKey = selectFirstChannel ? _pendingSelectionChannelKey : string.Empty;
         var searchText = ChannelSearchTextBox.Text.Trim();
         var selectedGroup = GroupFilterComboBox.SelectedItem as string;
         var favoritesOnly = FavoritesOnlyCheckBox.IsChecked == true;
+        var recentOnly = RecentOnlyCheckBox.IsChecked == true;
 
         var filteredChannels = _allChannels
             .Where(channel => MatchesSearch(channel, searchText))
             .Where(channel => MatchesGroup(channel, selectedGroup))
             .Where(channel => !favoritesOnly || channel.IsFavorite)
+            .Where(channel => !recentOnly || channel.RecentRank >= 0)
             .OrderByDescending(channel => channel.IsFavorite)
+            .ThenBy(channel => recentOnly ? channel.RecentRank : int.MaxValue)
             .ThenBy(channel => channel.GroupTitle, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
@@ -418,6 +619,16 @@ public partial class MainWindow : Window
             ChannelsListView.SelectedItem = _visibleChannels.FirstOrDefault(channel => string.Equals(channel.StreamUri.ToString(), selectedStream, StringComparison.OrdinalIgnoreCase));
         }
 
+        if (ChannelsListView.SelectedItem is null && !string.IsNullOrWhiteSpace(preferredChannelKey))
+        {
+            ChannelsListView.SelectedItem = _visibleChannels.FirstOrDefault(channel => string.Equals(channel.FavoriteKey, preferredChannelKey, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (selectFirstChannel)
+        {
+            _pendingSelectionChannelKey = string.Empty;
+        }
+
         if (ChannelsListView.SelectedItem is null && selectFirstChannel && _visibleChannels.Count > 0)
         {
             ChannelsListView.SelectedIndex = 0;
@@ -430,6 +641,7 @@ public partial class MainWindow : Window
         }
 
         UpdateChannelSummary();
+        StartGuideWarmupForVisibleChannels();
     }
 
     private static bool MatchesSearch(PlaylistChannel channel, string searchText)
@@ -441,7 +653,9 @@ public partial class MainWindow : Window
 
         return channel.Name.Contains(searchText, StringComparison.CurrentCultureIgnoreCase)
             || channel.GroupTitle.Contains(searchText, StringComparison.CurrentCultureIgnoreCase)
-            || channel.TvgId.Contains(searchText, StringComparison.CurrentCultureIgnoreCase);
+            || channel.TvgId.Contains(searchText, StringComparison.CurrentCultureIgnoreCase)
+            || channel.NowTitle.Contains(searchText, StringComparison.CurrentCultureIgnoreCase)
+            || channel.NextTitle.Contains(searchText, StringComparison.CurrentCultureIgnoreCase);
     }
 
     private static bool MatchesGroup(PlaylistChannel channel, string? selectedGroup)
@@ -466,11 +680,17 @@ public partial class MainWindow : Window
             summary += " Favorites only.";
         }
 
+        if (RecentOnlyCheckBox.IsChecked == true)
+        {
+            summary += " Recent only.";
+        }
+
         if (!string.IsNullOrWhiteSpace(GroupFilterComboBox.SelectedItem as string) && !string.Equals(GroupFilterComboBox.SelectedItem as string, AllGroupsLabel, StringComparison.Ordinal))
         {
             summary += $" Group: {GroupFilterComboBox.SelectedItem}.";
         }
 
+        summary += _recentChannelKeys.Count > 0 ? $" Recents tracked: {_recentChannelKeys.Count}." : string.Empty;
         ChannelSummaryTextBox.Text = summary;
     }
 
@@ -490,17 +710,36 @@ public partial class MainWindow : Window
         }
 
         SelectedChannelNameTextBox.Text = channel.Name;
-        SelectedChannelFavoriteStateTextBox.Text = channel.IsFavorite ? "Favorite" : "Not a favorite";
+        SelectedChannelFavoriteStateTextBox.Text = BuildChannelStateText(channel);
         SelectedChannelGroupTextBox.Text = string.IsNullOrWhiteSpace(channel.GroupTitle)
             ? "Ungrouped"
             : channel.GroupTitle;
         SelectedChannelIdTextBox.Text = string.IsNullOrWhiteSpace(channel.TvgId)
-            ? "Not available"
+            ? channel.StreamId?.ToString() ?? "Not available"
             : channel.TvgId;
         SelectedChannelUrlTextBox.Text = channel.StreamUri.ToString();
         SelectedChannelLogoImage.Source = CreateLogoSource(channel.LogoSource);
         ToggleFavoriteButton.IsEnabled = true;
         ToggleFavoriteButton.Content = channel.IsFavorite ? "Remove Favorite" : "Add Favorite";
+    }
+
+    private static string BuildChannelStateText(PlaylistChannel channel)
+    {
+        var stateParts = new List<string>
+        {
+            channel.IsFavorite ? "Favorite" : "Not a favorite"
+        };
+
+        if (channel.RecentRank == 0)
+        {
+            stateParts.Add("Last played");
+        }
+        else if (channel.RecentRank > 0)
+        {
+            stateParts.Add($"Recent #{channel.RecentRank + 1}");
+        }
+
+        return string.Join(" | ", stateParts);
     }
 
     private static ImageSource? CreateLogoSource(string logoSource)
@@ -536,32 +775,37 @@ public partial class MainWindow : Window
         return string.IsNullOrWhiteSpace(lastSegment) ? streamUri.Host : lastSegment;
     }
 
+    private void CancelGuideWarmup()
+    {
+        _guideWarmupCts?.Cancel();
+        _guideWarmupCts?.Dispose();
+        _guideWarmupCts = null;
+    }
+
     private void ToggleFavoriteButton_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedChannel is null)
+        var selectedChannel = SelectedChannel;
+        if (selectedChannel is null)
         {
             return;
         }
 
-        if (SelectedChannel.IsFavorite)
+        if (selectedChannel.IsFavorite)
         {
-            _favoriteChannelKeys.Remove(SelectedChannel.FavoriteKey);
-            SelectedChannel.IsFavorite = false;
-            StatusTextBlock.Text = $"Removed {SelectedChannel.Name} from favorites.";
+            _favoriteChannelKeys.Remove(selectedChannel.FavoriteKey);
+            selectedChannel.IsFavorite = false;
+            StatusTextBlock.Text = $"Removed {selectedChannel.Name} from favorites.";
         }
         else
         {
-            _favoriteChannelKeys.Add(SelectedChannel.FavoriteKey);
-            SelectedChannel.IsFavorite = true;
-            StatusTextBlock.Text = $"Added {SelectedChannel.Name} to favorites.";
+            _favoriteChannelKeys.Add(selectedChannel.FavoriteKey);
+            selectedChannel.IsFavorite = true;
+            StatusTextBlock.Text = $"Added {selectedChannel.Name} to favorites.";
         }
 
         _settingsStore.Save(CollectSettingsFromUi());
-        ApplyChannelFilter(selectFirstChannel: false);
-        if (SelectedChannel is not null)
-        {
-            UpdateSelectedChannelDetails(SelectedChannel);
-        }
+        UpdateSelectedChannelDetails(selectedChannel);
+        UpdateChannelSummary();
     }
 
     private void OpenPlayerButton_Click(object sender, RoutedEventArgs e)
@@ -625,10 +869,16 @@ public partial class MainWindow : Window
         ApplyChannelFilter(selectFirstChannel: false);
     }
 
+    private void RecentOnlyCheckBox_Click(object sender, RoutedEventArgs e)
+    {
+        ApplyChannelFilter(selectFirstChannel: false);
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         _logoWarmupCts?.Cancel();
         _epgLoadCts?.Cancel();
+        CancelGuideWarmup();
         _settingsStore.Save(CollectSettingsFromUi());
         _playerWindow?.Close();
         base.OnClosed(e);

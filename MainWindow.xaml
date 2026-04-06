@@ -28,11 +28,12 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <StackPanel Grid.Row="0" Margin="0,0,0,10">
             <TextBlock FontSize="26" FontWeight="SemiBold" Text="Schmube" />
-            <TextBlock Foreground="#4B5563" Text="Compact IPTV browser with Xtream loading, local logo cache, favorites, and guide data" />
+            <TextBlock Foreground="#4B5563" Text="Compact IPTV browser with Xtream loading, live guide previews, favorites, recents, and reconnect-ready playback" />
         </StackPanel>
 
         <StackPanel Grid.Row="1" Margin="0,0,0,10">
@@ -45,22 +46,12 @@
                      ToolTip="Paste an M3U playlist URL, a direct stream URL, or an Xtream get.php URL." />
         </StackPanel>
 
-        <WrapPanel Grid.Row="2" Margin="0,0,0,10" ItemHeight="58">
-            <StackPanel Width="240" Margin="0,0,12,0">
-                <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="User-Agent (optional)" />
-                <TextBox x:Name="UserAgentTextBox" Height="32" Padding="10,6" />
-            </StackPanel>
-
-            <StackPanel Width="240" Margin="0,0,12,0">
-                <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Referer (optional)" />
-                <TextBox x:Name="RefererTextBox" Height="32" Padding="10,6" />
-            </StackPanel>
-
+        <StackPanel Grid.Row="2" Margin="0,0,0,10" Orientation="Horizontal">
             <CheckBox x:Name="KeepOnTopCheckBox"
-                      Margin="0,26,16,0"
-                      VerticalAlignment="Top"
-                      Content="Keep player window on top" />
-        </WrapPanel>
+                      VerticalAlignment="Center"
+                      Content="Keep player window on top"
+                      ToolTip="Keep the separate player window above other windows while a stream is open." />
+        </StackPanel>
 
         <DockPanel Grid.Row="3" Margin="0,0,0,10" LastChildFill="True">
             <WrapPanel DockPanel.Dock="Left" VerticalAlignment="Center">
@@ -83,16 +74,24 @@
                           Margin="0,26,12,0"
                           VerticalAlignment="Top"
                           Content="Favorites only"
+                          ToolTip="Show only channels marked as favorites."
                           Click="FavoritesOnlyCheckBox_Click" />
+
+                <CheckBox x:Name="RecentOnlyCheckBox"
+                          Margin="0,26,12,0"
+                          VerticalAlignment="Top"
+                          Content="Recent only"
+                          ToolTip="Show only channels you played recently."
+                          Click="RecentOnlyCheckBox_Click" />
             </WrapPanel>
 
             <WrapPanel DockPanel.Dock="Right" VerticalAlignment="Bottom">
-                <Button x:Name="LoadChannelsButton" Width="106" Height="32" Margin="0,0,8,0" Content="Load Channels" Click="LoadChannelsButton_Click" />
-                <Button Width="102" Height="32" Margin="0,0,8,0" Content="Play Selected" Click="PlaySelectedButton_Click" />
-                <Button Width="86" Height="32" Margin="0,0,8,0" Content="Play URL" Click="PlayUrlButton_Click" />
-                <Button Width="96" Height="32" Margin="0,0,8,0" Content="Open Player" Click="OpenPlayerButton_Click" />
-                <Button Width="80" Height="32" Margin="0,0,8,0" Content="Stop" Click="StopButton_Click" />
-                <Button Width="72" Height="32" Content="Save" Click="SaveButton_Click" />
+                <Button x:Name="LoadChannelsButton" Width="106" Height="32" Margin="0,0,8,0" Content="Load Channels" Click="LoadChannelsButton_Click" ToolTip="Fetch channels from the configured playlist or Xtream account." />
+                <Button x:Name="PlaySelectedButton" Width="102" Height="32" Margin="0,0,8,0" Content="Play Selected" Click="PlaySelectedButton_Click" ToolTip="Play the currently selected channel in the player window." />
+                <Button x:Name="PlayUrlButton" Width="86" Height="32" Margin="0,0,8,0" Content="Play URL" Click="PlayUrlButton_Click" ToolTip="Play the raw URL above directly when it is a single stream." />
+                <Button x:Name="OpenPlayerButton" Width="96" Height="32" Margin="0,0,8,0" Content="Open Player" Click="OpenPlayerButton_Click" ToolTip="Open the separate resizable player window without starting playback." />
+                <Button x:Name="StopPlaybackButton" Width="80" Height="32" Margin="0,0,8,0" Content="Stop" Click="StopButton_Click" ToolTip="Stop playback in the player window." />
+                <Button x:Name="SaveSettingsButton" Width="72" Height="32" Content="Save" Click="SaveButton_Click" ToolTip="Save the current URL, favorites, recents, and window settings locally." />
             </WrapPanel>
         </DockPanel>
 
@@ -147,7 +146,8 @@
                                         Height="30"
                                         HorizontalAlignment="Left"
                                         Content="Add Favorite"
-                                        Click="ToggleFavoriteButton_Click" />
+                                        Click="ToggleFavoriteButton_Click"
+                                        ToolTip="Add or remove the selected channel from your favorites." />
                             </StackPanel>
                         </Grid>
 
@@ -235,6 +235,7 @@
                     <ListView.View>
                         <GridView AllowsColumnReorder="False">
                             <GridViewColumn Header="Fav" Width="38" DisplayMemberBinding="{Binding FavoriteMarker}" />
+                            <GridViewColumn Header="Recent" Width="52" DisplayMemberBinding="{Binding RecentMarker}" />
                             <GridViewColumn Header="Logo" Width="64">
                                 <GridViewColumn.CellTemplate>
                                     <DataTemplate>
@@ -253,8 +254,26 @@
                                     </DataTemplate>
                                 </GridViewColumn.CellTemplate>
                             </GridViewColumn>
-                            <GridViewColumn Header="Channel" Width="280" DisplayMemberBinding="{Binding Name}" />
-                            <GridViewColumn Header="Group" Width="220" DisplayMemberBinding="{Binding GroupTitle}" />
+                            <GridViewColumn Header="Channel" Width="220" DisplayMemberBinding="{Binding Name}" />
+                            <GridViewColumn Header="Now" Width="190">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding NowTitle}"
+                                                   ToolTip="{Binding NowTitle}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
+                            <GridViewColumn Header="Next" Width="190">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding NextTitle}"
+                                                   ToolTip="{Binding NextTitle}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
+                            <GridViewColumn Header="Group" Width="170" DisplayMemberBinding="{Binding GroupTitle}" />
                         </GridView>
                     </ListView.View>
                 </ListView>
@@ -262,6 +281,18 @@
         </Grid>
 
         <Border Grid.Row="5"
+                Margin="0,10,0,0"
+                Background="#F3F4F6"
+                BorderBrush="#E5E7EB"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="12,8">
+            <TextBlock x:Name="HintTextBlock"
+                       Foreground="#374151"
+                       Text="Focus a control to see what it does." />
+        </Border>
+
+        <Border Grid.Row="6"
                 Margin="0,10,0,0"
                 Background="#111827"
                 CornerRadius="8"

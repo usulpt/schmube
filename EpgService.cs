@@ -16,22 +16,10 @@ public sealed class EpgService
         Timeout = TimeSpan.FromSeconds(20)
     };
 
-    public async Task<IReadOnlyList<ProgramGuideEntry>> LoadShortGuideAsync(XtreamConnectionInfo connection, int streamId, string userAgent, string referer, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ProgramGuideEntry>> LoadShortGuideAsync(XtreamConnectionInfo connection, int streamId, CancellationToken cancellationToken = default)
     {
         var epgUri = new Uri(connection.BaseAddress, $"player_api.php?username={Uri.EscapeDataString(connection.Username)}&password={Uri.EscapeDataString(connection.Password)}&action=get_short_epg&stream_id={streamId}&limit=8");
-        using var request = new HttpRequestMessage(HttpMethod.Get, epgUri);
-
-        if (!string.IsNullOrWhiteSpace(userAgent))
-        {
-            request.Headers.TryAddWithoutValidation("User-Agent", userAgent);
-        }
-
-        if (!string.IsNullOrWhiteSpace(referer))
-        {
-            request.Headers.TryAddWithoutValidation("Referer", referer);
-        }
-
-        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var response = await _httpClient.GetAsync(epgUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
         return ParseShortGuide(json);

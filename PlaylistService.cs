@@ -57,29 +57,29 @@ public sealed class PlaylistService
         return true;
     }
 
-    public async Task<IReadOnlyList<PlaylistChannel>> LoadChannelsAsync(Uri sourceUri, string userAgent, string referer, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<PlaylistChannel>> LoadChannelsAsync(Uri sourceUri, CancellationToken cancellationToken = default)
     {
         if (TryGetXtreamConnection(sourceUri, out var connection) && connection is not null)
         {
-            return await LoadXtreamChannelsAsync(connection, userAgent, referer, cancellationToken);
+            return await LoadXtreamChannelsAsync(connection, cancellationToken);
         }
 
-        return await LoadM3uChannelsAsync(sourceUri, userAgent, referer, cancellationToken);
+        return await LoadM3uChannelsAsync(sourceUri, cancellationToken);
     }
 
-    private async Task<IReadOnlyList<PlaylistChannel>> LoadM3uChannelsAsync(Uri playlistUri, string userAgent, string referer, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<PlaylistChannel>> LoadM3uChannelsAsync(Uri playlistUri, CancellationToken cancellationToken)
     {
-        var content = await SendGetAsync(playlistUri, userAgent, referer, cancellationToken);
+        var content = await SendGetAsync(playlistUri, cancellationToken);
         return ParsePlaylist(playlistUri, content);
     }
 
-    private async Task<IReadOnlyList<PlaylistChannel>> LoadXtreamChannelsAsync(XtreamConnectionInfo connection, string userAgent, string referer, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<PlaylistChannel>> LoadXtreamChannelsAsync(XtreamConnectionInfo connection, CancellationToken cancellationToken)
     {
         var categoriesUri = new Uri(connection.BaseAddress, $"player_api.php?username={Uri.EscapeDataString(connection.Username)}&password={Uri.EscapeDataString(connection.Password)}&action=get_live_categories");
         var streamsUri = new Uri(connection.BaseAddress, $"player_api.php?username={Uri.EscapeDataString(connection.Username)}&password={Uri.EscapeDataString(connection.Password)}&action=get_live_streams");
 
-        var categoriesJson = await SendGetAsync(categoriesUri, userAgent, referer, cancellationToken);
-        var streamsJson = await SendGetAsync(streamsUri, userAgent, referer, cancellationToken);
+        var categoriesJson = await SendGetAsync(categoriesUri, cancellationToken);
+        var streamsJson = await SendGetAsync(streamsUri, cancellationToken);
 
         var categories = ParseXtreamCategories(categoriesJson);
         var channels = ParseXtreamStreams(streamsJson, categories, connection);
@@ -90,19 +90,9 @@ public sealed class PlaylistService
             .ToList();
     }
 
-    private async Task<string> SendGetAsync(Uri uri, string userAgent, string referer, CancellationToken cancellationToken)
+    private async Task<string> SendGetAsync(Uri uri, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-
-        if (!string.IsNullOrWhiteSpace(userAgent))
-        {
-            request.Headers.TryAddWithoutValidation("User-Agent", userAgent);
-        }
-
-        if (!string.IsNullOrWhiteSpace(referer))
-        {
-            request.Headers.TryAddWithoutValidation("Referer", referer);
-        }
 
         using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -322,3 +312,4 @@ public sealed class PlaylistService
         public string TvgLogo { get; init; } = string.Empty;
     }
 }
+
