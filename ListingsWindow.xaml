@@ -1,0 +1,157 @@
+<Window x:Class="Schmube.ListingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="TV Listings"
+        Height="780"
+        Width="1320"
+        MinHeight="680"
+        MinWidth="1080"
+        WindowStartupLocation="Manual">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+            <TextBlock FontSize="24" FontWeight="SemiBold" Text="TV Listings" />
+            <TextBlock Foreground="#4B5563" Text="Open a listings page, import the visible broadcaster rows, then turn matched playlist channels into a temporary navigation list." />
+        </StackPanel>
+
+        <DockPanel Grid.Row="1" Margin="0,0,0,12" LastChildFill="True">
+            <WrapPanel DockPanel.Dock="Right" VerticalAlignment="Center">
+                <Button x:Name="GoButton"
+                        Width="76"
+                        Height="32"
+                        Margin="0,0,8,0"
+                        Content="Go"
+                        Click="GoButton_Click" />
+                <Button x:Name="OpenExternalButton"
+                        Width="110"
+                        Height="32"
+                        Margin="0,0,8,0"
+                        Content="Open External"
+                        Click="OpenExternalButton_Click" />
+                <Button x:Name="ImportButton"
+                        Width="116"
+                        Height="32"
+                        Margin="0,0,8,0"
+                        Content="Import Page"
+                        Click="ImportButton_Click" />
+                <Button x:Name="UseTempListButton"
+                        Width="132"
+                        Height="32"
+                        Margin="0,0,8,0"
+                        Content="Use Temp List"
+                        Click="UseTempListButton_Click" />
+                <Button Width="74"
+                        Height="32"
+                        Content="Close"
+                        Click="CloseButton_Click" />
+            </WrapPanel>
+
+            <StackPanel Margin="0,0,12,0">
+                <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Listings URL" />
+                <TextBox x:Name="ListingUrlTextBox"
+                         Height="32"
+                         Padding="10,6"
+                         VerticalContentAlignment="Center" />
+            </StackPanel>
+        </DockPanel>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2.1*" />
+                <ColumnDefinition Width="10" />
+                <ColumnDefinition Width="1.35*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Background="#FFFFFF"
+                    BorderBrush="#E5E7EB"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="6">
+                <wv2:WebView2 x:Name="ListingsBrowser" />
+            </Border>
+
+            <GridSplitter Grid.Column="1"
+                          Width="10"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          Background="#E5E7EB"
+                          ShowsPreview="True" />
+
+            <Border Grid.Column="2"
+                    Background="#F9FAFB"
+                    BorderBrush="#E5E7EB"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="12">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0" Margin="0,0,0,10">
+                        <TextBlock FontSize="18" FontWeight="SemiBold" Text="Imported Listings" />
+                        <TextBlock x:Name="ImportedSummaryTextBlock"
+                                   Margin="0,4,0,0"
+                                   Foreground="#4B5563"
+                                   Text="Import a page to inspect broadcaster rows and playlist matches." />
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="1" Margin="0,0,0,10">
+                        <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Search Imported Rows" />
+                        <TextBox x:Name="ImportedSearchTextBox"
+                                 Height="32"
+                                 Padding="10,6"
+                                 TextChanged="ImportedSearchTextBox_TextChanged" />
+                    </StackPanel>
+
+                    <ListView x:Name="ImportedMatchesListView"
+                              Grid.Row="2"
+                              SelectionMode="Extended"
+                              SelectionChanged="ImportedMatchesListView_SelectionChanged">
+                        <ListView.View>
+                            <GridView AllowsColumnReorder="False">
+                                <GridViewColumn Header="Country" Width="120" DisplayMemberBinding="{Binding Country}" />
+                                <GridViewColumn Header="Broadcasters" Width="190" DisplayMemberBinding="{Binding BroadcasterText}" />
+                                <GridViewColumn Header="Matches" Width="62" DisplayMemberBinding="{Binding MatchCount}" />
+                                <GridViewColumn Header="Matched Channels" Width="260" DisplayMemberBinding="{Binding MatchPreview}" />
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+
+                    <StackPanel Grid.Row="3" Margin="0,10,0,0">
+                        <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Import Diagnostics" />
+                        <TextBox x:Name="DiagnosticsTextBox"
+                                 Height="124"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 HorizontalScrollBarVisibility="Auto"
+                                 FontFamily="Consolas"
+                                 FontSize="12" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Border Grid.Row="3"
+                Margin="0,12,0,0"
+                Background="#111827"
+                CornerRadius="8"
+                Padding="12,10">
+            <TextBlock x:Name="StatusTextBlock"
+                       Foreground="#F9FAFB"
+                       Text="Open a listings page, wait for it to finish loading, then click Import Page." />
+        </Border>
+    </Grid>
+</Window>

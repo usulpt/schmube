@@ -88,6 +88,8 @@
 
             <WrapPanel DockPanel.Dock="Right" VerticalAlignment="Bottom">
                 <Button x:Name="LoadChannelsButton" Width="106" Height="32" Margin="0,0,8,0" Content="Load Channels" Click="LoadChannelsButton_Click" ToolTip="Fetch channels from the configured playlist or Xtream account." />
+                <Button x:Name="TvListingsButton" Width="92" Height="32" Margin="0,0,8,0" Content="TV Listings" Click="TvListingsButton_Click" ToolTip="Open a listings page, import broadcasters, and turn matched channels into a temporary navigation list." />
+                <Button x:Name="ClearTempListButton" Width="92" Height="32" Margin="0,0,8,0" Content="Clear Temp" Click="ClearTempListButton_Click" ToolTip="Clear the active temporary channel list created from imported listings." />
                 <Button x:Name="PlaySelectedButton" Width="102" Height="32" Margin="0,0,8,0" Content="Play Selected" Click="PlaySelectedButton_Click" ToolTip="Play the currently selected channel in the player window." />
                 <Button x:Name="PlayUrlButton" Width="86" Height="32" Margin="0,0,8,0" Content="Play URL" Click="PlayUrlButton_Click" ToolTip="Play the raw URL above directly when it is a single stream." />
                 <Button x:Name="OpenPlayerButton" Width="96" Height="32" Margin="0,0,8,0" Content="Open Player" Click="OpenPlayerButton_Click" ToolTip="Open the separate resizable player window without starting playback." />

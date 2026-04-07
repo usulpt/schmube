@@ -33,6 +33,7 @@ public partial class MainWindow : Window
     private readonly HashSet<string> _favoriteChannelKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _recentChannelKeys = [];
     private readonly Dictionary<int, IReadOnlyList<ProgramGuideEntry>> _guideCache = [];
+    private readonly Dictionary<string, int> _temporaryChannelOrder = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly SchmubeAppConfig _appConfig;
     private readonly DispatcherTimer _searchDebounceTimer;
@@ -44,6 +45,7 @@ public partial class MainWindow : Window
     private string _defaultGroup = string.Empty;
     private string _lastPlayedChannelKey = string.Empty;
     private string _pendingSelectionChannelKey = string.Empty;
+    private string _temporaryListLabel = string.Empty;
     private XtreamConnectionInfo? _currentXtreamConnection;
     private PlayerWindow? _playerWindow;
 
@@ -78,6 +80,7 @@ public partial class MainWindow : Window
 
     private PlaylistChannel? SelectedChannel => ChannelsListView.SelectedItem as PlaylistChannel;
     private GroupFilterOption? SelectedGroupOption => GroupFilterComboBox.SelectedItem as GroupFilterOption;
+    private bool HasTemporaryChannelList => _temporaryChannelOrder.Count > 0;
 
     private void RegisterFocusHints()
     {
@@ -88,6 +91,8 @@ public partial class MainWindow : Window
         RegisterFocusHint(FavoritesOnlyCheckBox, "Show only channels you have marked as favorites.");
         RegisterFocusHint(RecentOnlyCheckBox, "Show only channels you played recently.");
         RegisterFocusHint(LoadChannelsButton, "Load or refresh the channel list from the configured source.");
+        RegisterFocusHint(TvListingsButton, "Open a listings page, import broadcaster rows, and build a temporary channel list from the current playlist.");
+        RegisterFocusHint(ClearTempListButton, "Clear the active temporary channel list and return to normal browsing.");
         RegisterFocusHint(PlaySelectedButton, "Start playback for the channel currently selected in the list.");
         RegisterFocusHint(PlayUrlButton, "Play the raw URL directly when it points to a single stream rather than a playlist account.");
         RegisterFocusHint(OpenPlayerButton, "Open the separate resizable player window without changing the current stream.");
@@ -136,6 +141,7 @@ public partial class MainWindow : Window
         KeepOnTopCheckBox.IsChecked = settings.KeepPlayerOnTop;
         FavoritesOnlyCheckBox.IsChecked = false;
         RecentOnlyCheckBox.IsChecked = false;
+        UpdateTemporaryListUi();
     }
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -697,18 +703,24 @@ public partial class MainWindow : Window
         var recentOnly = RecentOnlyCheckBox.IsChecked == true;
 
         var filteredChannels = _allChannels
+            .Where(channel => !HasTemporaryChannelList || _temporaryChannelOrder.ContainsKey(channel.StreamUri.ToString()))
             .Where(channel => MatchesSearch(channel, searchText))
             .Where(channel => MatchesGroup(channel, selectedGroup))
             .Where(channel => !favoritesOnly || channel.IsFavorite)
-            .Where(channel => !recentOnly || channel.RecentRank >= 0)
-            .OrderByDescending(channel => channel.IsFavorite)
-            .ThenBy(channel => recentOnly ? channel.RecentRank : int.MaxValue)
-            .ThenBy(channel => channel.GroupTitle, StringComparer.CurrentCultureIgnoreCase)
-            .ThenBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase)
-            .ToList();
+            .Where(channel => !recentOnly || channel.RecentRank >= 0);
+
+        var orderedChannels = HasTemporaryChannelList
+            ? filteredChannels
+                .OrderBy(channel => _temporaryChannelOrder[channel.StreamUri.ToString()])
+                .ThenBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase)
+            : filteredChannels
+                .OrderByDescending(channel => channel.IsFavorite)
+                .ThenBy(channel => recentOnly ? channel.RecentRank : int.MaxValue)
+                .ThenBy(channel => channel.GroupTitle, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase);
 
         _visibleChannels.Clear();
-        foreach (var channel in filteredChannels)
+        foreach (var channel in orderedChannels)
         {
             _visibleChannels.Add(channel);
         }
@@ -793,8 +805,54 @@ public partial class MainWindow : Window
             summary += $" Group: {selectedGroupOption.Label}.";
         }
 
+        if (HasTemporaryChannelList)
+        {
+            summary += $" Temporary list: {_temporaryListLabel} ({_temporaryChannelOrder.Count} channels).";
+        }
+
         summary += _recentChannelKeys.Count > 0 ? $" Recents tracked: {_recentChannelKeys.Count}." : string.Empty;
         ChannelSummaryTextBox.Text = summary;
+    }
+
+    private void ApplyTemporaryChannelList(TemporaryChannelListSelection selection)
+    {
+        _temporaryChannelOrder.Clear();
+        for (var index = 0; index < selection.StreamKeys.Count; index++)
+        {
+            var streamKey = selection.StreamKeys[index];
+            if (!string.IsNullOrWhiteSpace(streamKey) && !_temporaryChannelOrder.ContainsKey(streamKey))
+            {
+                _temporaryChannelOrder[streamKey] = index;
+            }
+        }
+
+        _temporaryListLabel = string.IsNullOrWhiteSpace(selection.Label) ? "TV listings" : selection.Label.Trim();
+        GroupFilterComboBox.SelectedIndex = 0;
+        ChannelSearchTextBox.Text = string.Empty;
+        FavoritesOnlyCheckBox.IsChecked = false;
+        RecentOnlyCheckBox.IsChecked = false;
+        UpdateTemporaryListUi();
+        ApplyChannelFilter(selectFirstChannel: true);
+    }
+
+    private void ClearTemporaryChannelList(string statusMessage = "Temporary channel list cleared.")
+    {
+        if (!HasTemporaryChannelList)
+        {
+            UpdateTemporaryListUi();
+            return;
+        }
+
+        _temporaryChannelOrder.Clear();
+        _temporaryListLabel = string.Empty;
+        UpdateTemporaryListUi();
+        ApplyChannelFilter(selectFirstChannel: false);
+        StatusTextBlock.Text = statusMessage;
+    }
+
+    private void UpdateTemporaryListUi()
+    {
+        ClearTempListButton.IsEnabled = HasTemporaryChannelList;
     }
 
     private void UpdateSelectedChannelDetails(PlaylistChannel? channel)
@@ -922,6 +980,27 @@ public partial class MainWindow : Window
     {
         EnsurePlayerWindow(true);
         StatusTextBlock.Text = "Player window opened.";
+    }
+
+    private void TvListingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        var listingsWindow = new ListingsWindow(_allChannels)
+        {
+            Owner = this
+        };
+
+        if (listingsWindow.ShowDialog() != true || listingsWindow.TemporarySelection is null)
+        {
+            return;
+        }
+
+        ApplyTemporaryChannelList(listingsWindow.TemporarySelection);
+        StatusTextBlock.Text = $"Temporary channel list loaded from {_temporaryListLabel}.";
+    }
+
+    private void ClearTempListButton_Click(object sender, RoutedEventArgs e)
+    {
+        ClearTemporaryChannelList();
     }
 
     private async void PlaySelectedButton_Click(object sender, RoutedEventArgs e)

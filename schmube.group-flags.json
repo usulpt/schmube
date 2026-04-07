@@ -1,4 +1,10 @@
 {
+  "aliases": {
+    "CON": "CG",
+    "CABO": "CV",
+    "ANG": "AO",
+    "AU": "AU"
+  },
   "rules": [
     {
       "match": "24/7",
