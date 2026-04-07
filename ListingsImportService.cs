@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using HtmlAgilityPack;
@@ -28,12 +30,13 @@ public sealed class ListingsImportService
         "NETWORK"
     };
 
+    private static readonly IReadOnlyDictionary<string, string> CountryAliasMap = BuildCountryAliasMap();
     private readonly IReadOnlyList<ChannelCandidate> _channelCandidates;
 
     public ListingsImportService(IReadOnlyList<PlaylistChannel> availableChannels)
     {
         _channelCandidates = availableChannels
-            .Select(channel => new ChannelCandidate(channel, BuildCandidateTokens(channel)))
+            .Select(channel => new ChannelCandidate(channel, BuildCandidateTokens(channel), BuildCountryCodes(channel), BuildNumberTokens(channel)))
             .Where(candidate => candidate.Tokens.Count > 0)
             .ToList();
     }
@@ -48,9 +51,36 @@ public sealed class ListingsImportService
     private ListingChannelMatch MatchEntry(ListingRow entry)
     {
         var normalizedBroadcasters = Normalize(entry.BroadcasterText);
-        var matchedChannels = _channelCandidates
-            .Where(candidate => candidate.Matches(normalizedBroadcasters))
-            .Select(candidate => candidate.Channel)
+        var entryCountryCodes = ResolveCountryCodes(entry.Country);
+        if (entryCountryCodes.Count == 0)
+        {
+            return new ListingChannelMatch(entry.Country, entry.BroadcasterText, []);
+        }
+
+        var broadcasterMatches = _channelCandidates
+            .Select(candidate => new ScoredCandidate(candidate, candidate.MatchScore(normalizedBroadcasters)))
+            .Where(item => item.Score > 0)
+            .ToList();
+
+        var countryFilteredMatches = broadcasterMatches
+            .Where(item => item.Candidate.CountryCodes.Overlaps(entryCountryCodes))
+            .ToList();
+
+        var entryNumberTokens = ExtractNumberTokens(entry.BroadcasterText);
+        var numberFilteredMatches = entryNumberTokens.Count == 0
+            ? []
+            : countryFilteredMatches
+                .Where(item => item.Candidate.NumberTokens.Overlaps(entryNumberTokens))
+                .ToList();
+
+        var effectiveMatches = numberFilteredMatches.Count > 0
+            ? numberFilteredMatches
+            : countryFilteredMatches;
+
+        var matchedChannels = effectiveMatches
+            .OrderByDescending(item => item.Score)
+            .ThenBy(item => item.Candidate.Channel.Name, StringComparer.CurrentCultureIgnoreCase)
+            .Select(item => item.Candidate.Channel)
             .DistinctBy(channel => channel.StreamUri.ToString())
             .ToList();
 
@@ -267,32 +297,240 @@ public sealed class ListingsImportService
         return true;
     }
 
-    private static HashSet<string> BuildCandidateTokens(PlaylistChannel channel)
+    private static List<WeightedToken> BuildCandidateTokens(PlaylistChannel channel)
     {
-        var tokens = new HashSet<string>(StringComparer.Ordinal);
-        AddToken(tokens, Normalize(channel.Name));
-        AddToken(tokens, Normalize(CleanupRegex.Replace(channel.Name, " ")));
-        AddToken(tokens, Normalize(channel.TvgId));
+        var tokens = new Dictionary<string, int>(StringComparer.Ordinal);
+        var cleanedName = CleanupRegex.Replace(channel.Name, " ");
+        var normalizedName = Normalize(channel.Name);
+        var normalizedCleanName = Normalize(cleanedName);
 
-        foreach (var rawToken in CleanupRegex.Replace(channel.Name, " ")
-                     .Split([' ', '-', '_', '/', '|', '.', '+', '(', ')', '[', ']', ':'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        AddToken(tokens, normalizedName, 100);
+        if (!string.Equals(normalizedName, normalizedCleanName, StringComparison.Ordinal))
         {
-            var normalizedToken = Normalize(rawToken);
-            if (normalizedToken.Length >= 4 && !IgnoredChannelTokens.Contains(normalizedToken))
+            AddToken(tokens, normalizedCleanName, 90);
+        }
+
+        AddToken(tokens, Normalize(channel.TvgId), 70);
+
+        var rawTokens = cleanedName
+            .Split([' ', '-', '_', '/', '|', '.', '+', '(', ')', '[', ']', ':'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(token => Normalize(token))
+            .Where(token => token.Length >= 2)
+            .ToList();
+
+        var meaningfulTokens = rawTokens
+            .Where(token => !IsCountryAlias(token) && !IgnoredChannelTokens.Contains(token))
+            .ToList();
+
+        if (meaningfulTokens.Count > 0)
+        {
+            AddToken(tokens, string.Concat(meaningfulTokens), 80);
+        }
+
+        foreach (var normalizedToken in meaningfulTokens)
+        {
+            if (normalizedToken.Length >= 4)
             {
-                AddToken(tokens, normalizedToken);
+                AddToken(tokens, normalizedToken, 50 + Math.Min(20, normalizedToken.Length));
+            }
+            else if (normalizedToken.Length == 3)
+            {
+                AddToken(tokens, normalizedToken, 35);
             }
         }
 
-        return tokens;
+        return tokens
+            .Select(pair => new WeightedToken(pair.Key, pair.Value))
+            .OrderByDescending(token => token.Weight)
+            .ThenByDescending(token => token.Text.Length)
+            .ToList();
     }
 
-    private static void AddToken(ISet<string> tokens, string value)
+    private static HashSet<string> BuildCountryCodes(PlaylistChannel channel)
+    {
+        var countryCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var source in EnumerateCountrySources(channel))
+        {
+            foreach (var token in EnumerateCountryTokens(source))
+            {
+                foreach (var code in ResolveCountryCodes(token))
+                {
+                    countryCodes.Add(code);
+                }
+            }
+        }
+
+        return countryCodes;
+    }
+
+    private static HashSet<string> BuildNumberTokens(PlaylistChannel channel)
+    {
+        var numbers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var source in EnumerateCountrySources(channel))
+        {
+            foreach (var number in ExtractNumberTokens(source))
+            {
+                numbers.Add(number);
+            }
+        }
+
+        foreach (var number in ExtractNumberTokens(channel.Name))
+        {
+            numbers.Add(number);
+        }
+
+        return numbers;
+    }
+
+    private static void AddToken(IDictionary<string, int> tokens, string value, int weight)
     {
         if (!string.IsNullOrWhiteSpace(value))
         {
-            tokens.Add(value);
+            if (!tokens.TryGetValue(value, out var existingWeight) || weight > existingWeight)
+            {
+                tokens[value] = weight;
+            }
         }
+    }
+
+    private static bool IsCountryAlias(string value)
+    {
+        return !string.IsNullOrWhiteSpace(value) && CountryAliasMap.ContainsKey(value);
+    }
+
+    private static HashSet<string> ExtractNumberTokens(string value)
+    {
+        var numbers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return numbers;
+        }
+
+        foreach (Match match in Regex.Matches(value, @"\b\d{1,4}\b"))
+        {
+            var token = match.Value.Trim();
+            if (!string.IsNullOrWhiteSpace(token))
+            {
+                numbers.Add(token);
+            }
+        }
+
+        return numbers;
+    }
+
+    private static IEnumerable<string> EnumerateCountrySources(PlaylistChannel channel)
+    {
+        if (!string.IsNullOrWhiteSpace(channel.GroupTitle))
+        {
+            yield return channel.GroupTitle;
+        }
+
+        if (!string.IsNullOrWhiteSpace(channel.GroupDisplayTitle))
+        {
+            yield return channel.GroupDisplayTitle;
+        }
+
+        if (!string.IsNullOrWhiteSpace(channel.Name))
+        {
+            var prefix = channel.Name.Split([':', '|', '-', '–', '—', '/'], 2, StringSplitOptions.TrimEntries)[0];
+            yield return prefix;
+        }
+
+        if (!string.IsNullOrWhiteSpace(channel.GroupFlag))
+        {
+            var fileName = Path.GetFileNameWithoutExtension(channel.GroupFlag);
+            if (!string.IsNullOrWhiteSpace(fileName))
+            {
+                yield return fileName;
+            }
+        }
+    }
+
+    private static IEnumerable<string> EnumerateCountryTokens(string source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            yield break;
+        }
+
+        yield return source;
+
+        foreach (var token in source.Split([' ', '\t', ':', '|', '-', '–', '—', '/', '(', ')', '[', ']', ',', '.'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            yield return token;
+        }
+    }
+
+    private static HashSet<string> ResolveCountryCodes(string source)
+    {
+        var countryCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var token in EnumerateCountryTokens(source))
+        {
+            var normalized = Normalize(token);
+            if (normalized.Length == 0)
+            {
+                continue;
+            }
+
+            if (CountryAliasMap.TryGetValue(normalized, out var code))
+            {
+                countryCodes.Add(code);
+            }
+        }
+
+        return countryCodes;
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildCountryAliasMap()
+    {
+        var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var culture in CultureInfo.GetCultures(CultureTypes.SpecificCultures))
+        {
+            try
+            {
+                var region = new RegionInfo(culture.Name);
+                AddCountryAlias(aliases, region.TwoLetterISORegionName, region.TwoLetterISORegionName);
+                AddCountryAlias(aliases, region.ThreeLetterISORegionName, region.TwoLetterISORegionName);
+                AddCountryAlias(aliases, region.EnglishName, region.TwoLetterISORegionName);
+                AddCountryAlias(aliases, region.NativeName, region.TwoLetterISORegionName);
+                AddCountryAlias(aliases, region.Name, region.TwoLetterISORegionName);
+            }
+            catch
+            {
+            }
+        }
+
+        AddCountryAlias(aliases, "UK", "GB");
+        AddCountryAlias(aliases, "United Kingdom", "GB");
+        AddCountryAlias(aliases, "England", "GB");
+        AddCountryAlias(aliases, "USA", "US");
+        AddCountryAlias(aliases, "United States", "US");
+        AddCountryAlias(aliases, "Congo", "CG");
+        AddCountryAlias(aliases, "Congo DR", "CD");
+        AddCountryAlias(aliases, "DR Congo", "CD");
+        AddCountryAlias(aliases, "Cape Verde Islands", "CV");
+        AddCountryAlias(aliases, "Cape Verde", "CV");
+        AddCountryAlias(aliases, "Cabo Verde", "CV");
+        AddCountryAlias(aliases, "Bosnia and Herzegovina", "BA");
+        AddCountryAlias(aliases, "Ivory Coast", "CI");
+
+        return aliases;
+    }
+
+    private static void AddCountryAlias(IDictionary<string, string> aliases, string alias, string code)
+    {
+        var normalizedAlias = Normalize(alias);
+        var normalizedCode = Normalize(code);
+        if (normalizedAlias.Length == 0 || normalizedCode.Length != 2)
+        {
+            return;
+        }
+
+        aliases[normalizedAlias] = normalizedCode;
     }
 
     private static string CleanDisplay(string value)
@@ -307,26 +545,31 @@ public sealed class ListingsImportService
 
     private readonly record struct ListingRow(string Country, string BroadcasterText);
 
-    private sealed record ChannelCandidate(PlaylistChannel Channel, HashSet<string> Tokens)
+    private sealed record ChannelCandidate(PlaylistChannel Channel, List<WeightedToken> Tokens, HashSet<string> CountryCodes, HashSet<string> NumberTokens)
     {
-        public bool Matches(string normalizedBroadcasters)
+        public int MatchScore(string normalizedBroadcasters)
         {
             if (string.IsNullOrWhiteSpace(normalizedBroadcasters))
             {
-                return false;
+                return 0;
             }
 
-            foreach (var token in Tokens.OrderByDescending(token => token.Length))
+            var score = 0;
+            foreach (var token in Tokens)
             {
-                if (token.Length >= 3 && normalizedBroadcasters.Contains(token, StringComparison.Ordinal))
+                if (token.Text.Length >= 3 && normalizedBroadcasters.Contains(token.Text, StringComparison.Ordinal))
                 {
-                    return true;
+                    score += token.Weight;
                 }
             }
 
-            return false;
+            return score;
         }
     }
+
+    private sealed record WeightedToken(string Text, int Weight);
+
+    private sealed record ScoredCandidate(ChannelCandidate Candidate, int Score);
 }
 
 public sealed class ListingChannelMatch
