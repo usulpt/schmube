@@ -33,7 +33,7 @@
 
         <StackPanel Grid.Row="0" Margin="0,0,0,10">
             <TextBlock FontSize="26" FontWeight="SemiBold" Text="Schmube" />
-            <TextBlock Foreground="#4B5563" Text="Compact IPTV browser with Xtream loading, live guide previews, favorites, recents, and reconnect-ready playback" />
+            <TextBlock Foreground="#4B5563" Text="Compact IPTV browser with Xtream loading, group flag mapping, live guide previews, recents, recording, and reconnect-ready playback" />
         </StackPanel>
 
         <StackPanel Grid.Row="1" Margin="0,0,0,10">
@@ -236,6 +236,36 @@
                         <GridView AllowsColumnReorder="False">
                             <GridViewColumn Header="Fav" Width="38" DisplayMemberBinding="{Binding FavoriteMarker}" />
                             <GridViewColumn Header="Recent" Width="52" DisplayMemberBinding="{Binding RecentMarker}" />
+                            <GridViewColumn Header="Flag" Width="76">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Border Padding="6,2"
+                                                CornerRadius="4"
+                                                Background="#22354A"
+                                                BorderBrush="#486A86"
+                                                BorderThickness="1"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding GroupFlag}" Value="">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <TextBlock Text="{Binding GroupFlag}"
+                                                       FontSize="11"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="#F2F7FB"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center" />
+                                        </Border>
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
                             <GridViewColumn Header="Logo" Width="64">
                                 <GridViewColumn.CellTemplate>
                                     <DataTemplate>
@@ -273,7 +303,7 @@
                                     </DataTemplate>
                                 </GridViewColumn.CellTemplate>
                             </GridViewColumn>
-                            <GridViewColumn Header="Group" Width="170" DisplayMemberBinding="{Binding GroupTitle}" />
+                            <GridViewColumn Header="Group" Width="170" DisplayMemberBinding="{Binding GroupDisplayTitle}" />
                         </GridView>
                     </ListView.View>
                 </ListView>
@@ -303,4 +333,9 @@
         </Border>
     </Grid>
 </Window>
+
+
+
+
+
 

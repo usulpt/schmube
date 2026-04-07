@@ -1,0 +1,16 @@
+{
+  "rules": [
+    {
+      "match": "VIP SPORTS",
+      "matchMode": "Contains",
+      "countryCode": "GB",
+      "label": "United Kingdom"
+    },
+    {
+      "match": "LUSO SPECIAL",
+      "matchMode": "StartsWith",
+      "countryCode": "PT",
+      "label": "Portugal"
+    }
+  ]
+}

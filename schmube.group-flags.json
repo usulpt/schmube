@@ -1,0 +1,10 @@
+{
+  "rules": [
+    {
+      "match": "24/7",
+      "matchMode": "Contains",
+      "countryCode": "GB",
+      "label": "United Kingdom"
+    }
+  ]
+}

@@ -20,12 +20,13 @@ public sealed class StreamSettings
 
 public sealed class PlaybackRequest
 {
-    public PlaybackRequest(Uri streamUri, bool keepPlayerOnTop, string displayName, bool allowReconnect)
+    public PlaybackRequest(Uri streamUri, bool keepPlayerOnTop, string displayName, bool allowReconnect, string recordingsDirectory)
     {
         StreamUri = streamUri;
         KeepPlayerOnTop = keepPlayerOnTop;
         DisplayName = displayName;
         AllowReconnect = allowReconnect;
+        RecordingsDirectory = recordingsDirectory;
     }
 
     public Uri StreamUri { get; }
@@ -35,6 +36,8 @@ public sealed class PlaybackRequest
     public string DisplayName { get; }
 
     public bool AllowReconnect { get; }
+
+    public string RecordingsDirectory { get; }
 }
 
 public sealed class PlaylistChannel : INotifyPropertyChanged
@@ -44,6 +47,8 @@ public sealed class PlaylistChannel : INotifyPropertyChanged
     private int _recentRank = -1;
     private string _nowTitle = string.Empty;
     private string _nextTitle = string.Empty;
+    private string _groupFlag = string.Empty;
+    private string _groupDisplayTitle = string.Empty;
 
     public required string Name { get; init; }
 
@@ -99,6 +104,18 @@ public sealed class PlaylistChannel : INotifyPropertyChanged
         set => SetField(ref _nextTitle, value);
     }
 
+    public string GroupFlag
+    {
+        get => _groupFlag;
+        set => SetField(ref _groupFlag, value);
+    }
+
+    public string GroupDisplayTitle
+    {
+        get => _groupDisplayTitle;
+        set => SetField(ref _groupDisplayTitle, value);
+    }
+
     public string FavoriteKey => string.IsNullOrWhiteSpace(TvgId) ? StreamUri.ToString() : TvgId;
 
     public string FavoriteMarker => IsFavorite ? "*" : string.Empty;
@@ -132,6 +149,8 @@ public sealed class SchmubeAppConfig
     public string DefaultGroup { get; set; } = string.Empty;
 
     public bool AutoLoadOnStartup { get; set; } = true;
+
+    public string RecordingsDirectory { get; set; } = string.Empty;
 }
 
 public sealed class XtreamConnectionInfo

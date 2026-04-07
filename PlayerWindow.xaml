@@ -15,18 +15,38 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <DockPanel Grid.Row="0" Background="#111827" LastChildFill="True" Height="42">
-            <Button Width="80"
+        <DockPanel Grid.Row="0" Background="#111827" LastChildFill="True" Height="46">
+            <Button Width="90"
                     Margin="10,6,0,6"
                     Content="Stop"
                     Click="StopButton_Click"
                     DockPanel.Dock="Right" />
 
-            <TextBlock x:Name="NowPlayingText"
-                       Margin="12,0,12,0"
-                       VerticalAlignment="Center"
-                       Foreground="#F9FAFB"
-                       Text="No stream loaded" />
+            <Button x:Name="OpenRecordingsButton"
+                    Width="120"
+                    Margin="10,6,0,6"
+                    Content="Open Folder"
+                    Click="OpenRecordingsButton_Click"
+                    DockPanel.Dock="Right" />
+
+            <Button x:Name="ToggleRecordingButton"
+                    Width="104"
+                    Margin="10,6,0,6"
+                    Content="Start Rec"
+                    Click="ToggleRecordingButton_Click"
+                    DockPanel.Dock="Right" />
+
+            <StackPanel Margin="12,0,12,0"
+                        VerticalAlignment="Center">
+                <TextBlock x:Name="NowPlayingText"
+                           Foreground="#F9FAFB"
+                           Text="No stream loaded" />
+                <TextBlock x:Name="RecordingText"
+                           Foreground="#FCA5A5"
+                           FontWeight="SemiBold"
+                           Visibility="Collapsed"
+                           Text="REC" />
+            </StackPanel>
         </DockPanel>
 
         <vlc:VideoView x:Name="VideoSurface" Grid.Row="1" />

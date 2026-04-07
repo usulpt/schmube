@@ -21,6 +21,7 @@ public partial class MainWindow : Window
 
     private readonly SettingsStore _settingsStore = new();
     private readonly AppConfigStore _appConfigStore = new();
+    private readonly GroupFlagStore _groupFlagStore = new();
     private readonly PlaylistService _playlistService = new();
     private readonly LogoCacheService _logoCacheService = new();
     private readonly EpgService _epgService = new();
@@ -166,7 +167,7 @@ public partial class MainWindow : Window
     private PlaybackRequest BuildPlaybackRequest(Uri streamUri, string displayName, bool allowReconnect)
     {
         var settings = CollectSettingsFromUi();
-        return new PlaybackRequest(streamUri, settings.KeepPlayerOnTop, displayName, allowReconnect);
+        return new PlaybackRequest(streamUri, settings.KeepPlayerOnTop, displayName, allowReconnect, ResolveRecordingsDirectory());
     }
 
     private bool TryBuildDirectRequest(out PlaybackRequest? request)
@@ -267,6 +268,7 @@ public partial class MainWindow : Window
             var channels = (await _playlistService.LoadChannelsAsync(playlistUri)).ToList();
             ApplyFavoriteStates(channels);
             ApplyRecentStates(channels);
+            ApplyGroupFlags(channels);
             _logoCacheService.RefreshResolvedLogoSources(channels);
 
             _allChannels.Clear();
@@ -320,6 +322,18 @@ public partial class MainWindow : Window
         foreach (var channel in channels)
         {
             channel.RecentRank = recentLookup.TryGetValue(channel.FavoriteKey, out var index) ? index : -1;
+        }
+    }
+
+    private void ApplyGroupFlags(IEnumerable<PlaylistChannel> channels)
+    {
+        foreach (var channel in channels)
+        {
+            var groupInfo = _groupFlagStore.Resolve(channel.GroupTitle);
+            channel.GroupFlag = groupInfo.Flag;
+            channel.GroupDisplayTitle = string.IsNullOrWhiteSpace(channel.GroupTitle)
+                ? groupInfo.DisplayTitle
+                : channel.GroupTitle;
         }
     }
 
@@ -653,6 +667,7 @@ public partial class MainWindow : Window
 
         return channel.Name.Contains(searchText, StringComparison.CurrentCultureIgnoreCase)
             || channel.GroupTitle.Contains(searchText, StringComparison.CurrentCultureIgnoreCase)
+            || channel.GroupDisplayTitle.Contains(searchText, StringComparison.CurrentCultureIgnoreCase)
             || channel.TvgId.Contains(searchText, StringComparison.CurrentCultureIgnoreCase)
             || channel.NowTitle.Contains(searchText, StringComparison.CurrentCultureIgnoreCase)
             || channel.NextTitle.Contains(searchText, StringComparison.CurrentCultureIgnoreCase);
@@ -767,6 +782,18 @@ public partial class MainWindow : Window
     private void SetLoadingState(bool isLoading)
     {
         LoadChannelsButton.IsEnabled = !isLoading;
+    }
+
+    private string ResolveRecordingsDirectory()
+    {
+        if (!string.IsNullOrWhiteSpace(_appConfig.RecordingsDirectory))
+        {
+            return _appConfig.RecordingsDirectory.Trim();
+        }
+
+        return System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyVideos),
+            "Schmube");
     }
 
     private static string BuildDisplayName(Uri streamUri)
@@ -884,4 +911,11 @@ public partial class MainWindow : Window
         base.OnClosed(e);
     }
 }
+
+
+
+
+
+
+
 
