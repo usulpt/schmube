@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Input;
 using LibVLCSharp.Shared;
 
 namespace Schmube;
@@ -12,6 +13,8 @@ namespace Schmube;
 public partial class PlayerWindow : Window
 {
     private const int MaxReconnectAttempts = 3;
+    private const int DefaultVolume = 100;
+    private const int VolumeStep = 10;
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(3);
 
     private readonly LibVLC _libVlc;
@@ -24,6 +27,13 @@ public partial class PlayerWindow : Window
     private int _reconnectAttempt;
     private bool _isRecording;
     private string _recordingFilePath = string.Empty;
+    private bool _keepPlayerOnTopRequested;
+    private bool _isFullScreen;
+    private WindowState _restoreWindowState = WindowState.Normal;
+    private WindowStyle _restoreWindowStyle = WindowStyle.SingleBorderWindow;
+    private ResizeMode _restoreResizeMode = ResizeMode.CanResize;
+
+    public event EventHandler<int>? ChannelStepRequested;
 
     public PlayerWindow()
     {
@@ -33,6 +43,7 @@ public partial class PlayerWindow : Window
 
         _libVlc = new LibVLC("--network-caching=1500");
         _mediaPlayer = new MediaPlayer(_libVlc);
+        _mediaPlayer.Volume = DefaultVolume;
         VideoSurface.MediaPlayer = _mediaPlayer;
 
         _mediaPlayer.Playing += (_, _) => SetStatus("Playing.");
@@ -47,7 +58,10 @@ public partial class PlayerWindow : Window
         _mediaPlayer.EndReached += (_, _) => HandlePlaybackInterruption("Stream ended.");
         _mediaPlayer.EncounteredError += (_, _) => HandlePlaybackInterruption("Playback error.");
 
+        PreviewKeyDown += PlayerWindow_PreviewKeyDown;
+
         UpdateRecordingVisualState();
+        UpdateAudioVisualState();
     }
 
     public Task PlayAsync(PlaybackRequest request)
@@ -66,6 +80,7 @@ public partial class PlayerWindow : Window
 
             StartPlaybackCore(request, isReconnect: false);
             UpdateRecordingVisualState();
+            UpdateAudioVisualState();
         }).Task;
     }
 
@@ -88,7 +103,13 @@ public partial class PlayerWindow : Window
 
     public void SetAlwaysOnTop(bool isOnTop)
     {
-        Topmost = isOnTop;
+        _keepPlayerOnTopRequested = isOnTop;
+        ApplyTopmostState();
+    }
+
+    private void ApplyTopmostState()
+    {
+        Topmost = _keepPlayerOnTopRequested || _isFullScreen;
     }
 
     private void StartPlaybackCore(PlaybackRequest request, bool isReconnect)
@@ -325,6 +346,176 @@ public partial class PlayerWindow : Window
             : string.Empty;
     }
 
+    private void UpdateAudioVisualState()
+    {
+        VolumeText.Text = BuildAudioStatusText();
+        ToggleMuteButton.Content = _mediaPlayer.Mute ? "Unmute" : "Mute";
+    }
+
+    private string BuildAudioStatusText()
+    {
+        var volume = Math.Max(_mediaPlayer.Volume, 0);
+        return _mediaPlayer.Mute ? $"Muted ({volume}%)" : $"Volume {volume}%";
+    }
+
+    private void AdjustVolume(int delta)
+    {
+        var newVolume = Math.Clamp(_mediaPlayer.Volume + delta, 0, 200);
+        _mediaPlayer.Volume = newVolume;
+        if (newVolume > 0 && _mediaPlayer.Mute)
+        {
+            _mediaPlayer.Mute = false;
+        }
+
+        UpdateAudioVisualState();
+        SetStatus(BuildAudioStatusText());
+    }
+
+    private void ToggleMute()
+    {
+        _mediaPlayer.Mute = !_mediaPlayer.Mute;
+        UpdateAudioVisualState();
+        SetStatus(BuildAudioStatusText());
+    }
+
+    private void ToggleFullScreen()
+    {
+        if (_isFullScreen)
+        {
+            ExitFullScreen();
+            return;
+        }
+
+        _restoreWindowState = WindowState;
+        _restoreWindowStyle = WindowStyle;
+        _restoreResizeMode = ResizeMode;
+        _isFullScreen = true;
+        PlayerToolbar.Visibility = Visibility.Collapsed;
+        PlayerStatusBar.Visibility = Visibility.Collapsed;
+        WindowStyle = WindowStyle.None;
+        ResizeMode = ResizeMode.NoResize;
+        WindowState = WindowState.Maximized;
+        FullScreenButton.Content = "Window";
+        ApplyTopmostState();
+        SetStatus("Full screen enabled.");
+    }
+
+    private void ExitFullScreen()
+    {
+        if (!_isFullScreen)
+        {
+            return;
+        }
+
+        _isFullScreen = false;
+        WindowState = WindowState.Normal;
+        WindowStyle = _restoreWindowStyle;
+        ResizeMode = _restoreResizeMode;
+        WindowState = _restoreWindowState;
+        PlayerToolbar.Visibility = Visibility.Visible;
+        PlayerStatusBar.Visibility = Visibility.Visible;
+        FullScreenButton.Content = "Full";
+        ApplyTopmostState();
+        SetStatus("Full screen disabled.");
+    }
+
+    private void RequestChannelStep(int delta)
+    {
+        ChannelStepRequested?.Invoke(this, delta);
+    }
+
+    private void PreviousChannelButton_Click(object sender, RoutedEventArgs e)
+    {
+        RequestChannelStep(-1);
+    }
+
+    private void NextChannelButton_Click(object sender, RoutedEventArgs e)
+    {
+        RequestChannelStep(1);
+    }
+
+    private void VolumeDownButton_Click(object sender, RoutedEventArgs e)
+    {
+        AdjustVolume(-VolumeStep);
+    }
+
+    private void VolumeUpButton_Click(object sender, RoutedEventArgs e)
+    {
+        AdjustVolume(VolumeStep);
+    }
+
+    private void ToggleMuteButton_Click(object sender, RoutedEventArgs e)
+    {
+        ToggleMute();
+    }
+
+    private void FullScreenButton_Click(object sender, RoutedEventArgs e)
+    {
+        ToggleFullScreen();
+    }
+
+    private void VideoSurface_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount != 2)
+        {
+            return;
+        }
+
+        ToggleFullScreen();
+        e.Handled = true;
+    }
+
+    private void PlayerWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.F || (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.Alt))
+        {
+            ToggleFullScreen();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Escape && _isFullScreen)
+        {
+            ExitFullScreen();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.M)
+        {
+            ToggleMute();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Up)
+        {
+            AdjustVolume(VolumeStep);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Down)
+        {
+            AdjustVolume(-VolumeStep);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.PageUp || (e.Key == Key.Left && Keyboard.Modifiers == ModifierKeys.Control))
+        {
+            RequestChannelStep(-1);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.PageDown || (e.Key == Key.Right && Keyboard.Modifiers == ModifierKeys.Control))
+        {
+            RequestChannelStep(1);
+            e.Handled = true;
+        }
+    }
+
     private void StopButton_Click(object sender, RoutedEventArgs e)
     {
         Stop();
@@ -344,6 +535,7 @@ public partial class PlayerWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         CancelReconnect();
+        PreviewKeyDown -= PlayerWindow_PreviewKeyDown;
         VideoSurface.MediaPlayer = null;
         _currentMedia?.Dispose();
         _mediaPlayer.Dispose();

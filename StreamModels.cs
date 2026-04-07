@@ -18,6 +18,19 @@ public sealed class StreamSettings
     public string LastChannelKey { get; set; } = string.Empty;
 }
 
+public sealed class GroupFilterOption
+{
+    public GroupFilterOption(string value, string label)
+    {
+        Value = value;
+        Label = label;
+    }
+
+    public string Value { get; }
+
+    public string Label { get; }
+}
+
 public sealed class PlaybackRequest
 {
     public PlaybackRequest(Uri streamUri, bool keepPlayerOnTop, string displayName, bool allowReconnect, string recordingsDirectory)
@@ -184,3 +197,4 @@ public sealed class ProgramGuideEntry
 
     public string TimeRange => $"{StartLocal:ddd HH:mm} - {EndLocal:HH:mm}";
 }
+

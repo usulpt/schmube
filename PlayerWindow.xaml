@@ -15,43 +15,87 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <DockPanel Grid.Row="0" Background="#111827" LastChildFill="True" Height="46">
-            <Button Width="90"
-                    Margin="10,6,0,6"
-                    Content="Stop"
-                    Click="StopButton_Click"
-                    DockPanel.Dock="Right" />
+        <DockPanel x:Name="PlayerToolbar" Grid.Row="0" Background="#111827" LastChildFill="True" Height="46">
+            <StackPanel DockPanel.Dock="Left"
+                        Orientation="Horizontal"
+                        Margin="10,6,0,6">
+                <Button Width="58"
+                        Margin="0,0,8,0"
+                        Content="Prev"
+                        Click="PreviousChannelButton_Click"
+                        ToolTip="Previous visible channel (Page Up or Ctrl+Left)." />
+                <Button Width="58"
+                        Margin="0,0,8,0"
+                        Content="Next"
+                        Click="NextChannelButton_Click"
+                        ToolTip="Next visible channel (Page Down or Ctrl+Right)." />
+            </StackPanel>
 
-            <Button x:Name="OpenRecordingsButton"
-                    Width="120"
-                    Margin="10,6,0,6"
-                    Content="Open Folder"
-                    Click="OpenRecordingsButton_Click"
-                    DockPanel.Dock="Right" />
-
-            <Button x:Name="ToggleRecordingButton"
-                    Width="104"
-                    Margin="10,6,0,6"
-                    Content="Start Rec"
-                    Click="ToggleRecordingButton_Click"
-                    DockPanel.Dock="Right" />
+            <StackPanel DockPanel.Dock="Right"
+                        Orientation="Horizontal"
+                        Margin="0,6,10,6">
+                <Button Width="52"
+                        Margin="0,0,8,0"
+                        Content="Vol -"
+                        Click="VolumeDownButton_Click"
+                        ToolTip="Lower volume (Down Arrow)." />
+                <Button x:Name="ToggleMuteButton"
+                        Width="72"
+                        Margin="0,0,8,0"
+                        Content="Mute"
+                        Click="ToggleMuteButton_Click"
+                        ToolTip="Mute or unmute audio (M)." />
+                <Button Width="52"
+                        Margin="0,0,8,0"
+                        Content="Vol +"
+                        Click="VolumeUpButton_Click"
+                        ToolTip="Raise volume (Up Arrow)." />
+                <Button x:Name="FullScreenButton"
+                        Width="64"
+                        Margin="0,0,8,0"
+                        Content="Full"
+                        Click="FullScreenButton_Click"
+                        ToolTip="Toggle full screen (F or Alt+Enter, Escape to exit)." />
+                <Button x:Name="ToggleRecordingButton"
+                        Width="104"
+                        Margin="0,0,8,0"
+                        Content="Start Rec"
+                        Click="ToggleRecordingButton_Click" />
+                <Button x:Name="OpenRecordingsButton"
+                        Width="120"
+                        Margin="0,0,8,0"
+                        Content="Open Folder"
+                        Click="OpenRecordingsButton_Click" />
+                <Button Width="90"
+                        Content="Stop"
+                        Click="StopButton_Click" />
+            </StackPanel>
 
             <StackPanel Margin="12,0,12,0"
                         VerticalAlignment="Center">
                 <TextBlock x:Name="NowPlayingText"
                            Foreground="#F9FAFB"
                            Text="No stream loaded" />
-                <TextBlock x:Name="RecordingText"
-                           Foreground="#FCA5A5"
-                           FontWeight="SemiBold"
-                           Visibility="Collapsed"
-                           Text="REC" />
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="RecordingText"
+                               Margin="0,0,12,0"
+                               Foreground="#FCA5A5"
+                               FontWeight="SemiBold"
+                               Visibility="Collapsed"
+                               Text="REC" />
+                    <TextBlock x:Name="VolumeText"
+                               Foreground="#93C5FD"
+                               FontWeight="SemiBold"
+                               Text="Volume 100%" />
+                </StackPanel>
             </StackPanel>
         </DockPanel>
 
-        <vlc:VideoView x:Name="VideoSurface" Grid.Row="1" />
+        <vlc:VideoView x:Name="VideoSurface"
+                       Grid.Row="1"
+                       MouseLeftButtonDown="VideoSurface_MouseLeftButtonDown" />
 
-        <Border Grid.Row="2" Background="#111827" Padding="12,8">
+        <Border x:Name="PlayerStatusBar" Grid.Row="2" Background="#111827" Padding="12,8">
             <TextBlock x:Name="StatusText"
                        Foreground="#D1D5DB"
                        Text="Ready." />

@@ -9,6 +9,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 
 namespace Schmube;
 
@@ -27,13 +28,15 @@ public partial class MainWindow : Window
     private readonly EpgService _epgService = new();
     private readonly List<PlaylistChannel> _allChannels = [];
     private readonly ObservableCollection<PlaylistChannel> _visibleChannels = [];
-    private readonly ObservableCollection<string> _groupOptions = [AllGroupsLabel];
+    private readonly ObservableCollection<GroupFilterOption> _groupOptions = [BuildAllGroupsOption()];
     private readonly ObservableCollection<ProgramGuideEntry> _programGuideEntries = [];
     private readonly HashSet<string> _favoriteChannelKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _recentChannelKeys = [];
     private readonly Dictionary<int, IReadOnlyList<ProgramGuideEntry>> _guideCache = [];
 
     private readonly SchmubeAppConfig _appConfig;
+    private readonly DispatcherTimer _searchDebounceTimer;
+    private readonly DispatcherTimer _guideWarmupDebounceTimer;
     private CancellationTokenSource? _logoWarmupCts;
     private CancellationTokenSource? _epgLoadCts;
     private CancellationTokenSource? _guideWarmupCts;
@@ -47,6 +50,10 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         _appConfig = _appConfigStore.Load();
+        _searchDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        _searchDebounceTimer.Tick += SearchDebounceTimer_Tick;
+        _guideWarmupDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        _guideWarmupDebounceTimer.Tick += GuideWarmupDebounceTimer_Tick;
 
         InitializeComponent();
 
@@ -64,7 +71,13 @@ public partial class MainWindow : Window
         UpdateSelectedChannelDetails(null);
     }
 
+    private static GroupFilterOption BuildAllGroupsOption()
+    {
+        return new(AllGroupsLabel, AllGroupsLabel);
+    }
+
     private PlaylistChannel? SelectedChannel => ChannelsListView.SelectedItem as PlaylistChannel;
+    private GroupFilterOption? SelectedGroupOption => GroupFilterComboBox.SelectedItem as GroupFilterOption;
 
     private void RegisterFocusHints()
     {
@@ -194,8 +207,12 @@ public partial class MainWindow : Window
     {
         if (_playerWindow is null || !_playerWindow.IsLoaded)
         {
-            _playerWindow = new PlayerWindow();
-            _playerWindow.Closed += (_, _) => _playerWindow = null;
+            _playerWindow = new PlayerWindow
+            {
+                Owner = this
+            };
+            _playerWindow.ChannelStepRequested += PlayerWindow_ChannelStepRequested;
+            _playerWindow.Closed += PlayerWindow_Closed;
             _playerWindow.Show();
         }
 
@@ -212,6 +229,53 @@ public partial class MainWindow : Window
         }
 
         return _playerWindow;
+    }
+
+    private void PlayerWindow_Closed(object? sender, EventArgs e)
+    {
+        if (sender is PlayerWindow playerWindow)
+        {
+            playerWindow.ChannelStepRequested -= PlayerWindow_ChannelStepRequested;
+        }
+
+        if (ReferenceEquals(_playerWindow, sender))
+        {
+            _playerWindow = null;
+        }
+    }
+
+    private async void PlayerWindow_ChannelStepRequested(object? sender, int delta)
+    {
+        await StepVisibleChannelAsync(delta);
+    }
+
+    private async Task StepVisibleChannelAsync(int delta)
+    {
+        if (_visibleChannels.Count == 0)
+        {
+            StatusTextBlock.Text = "Load channels first to use next/previous channel controls.";
+            return;
+        }
+
+        var currentIndex = SelectedChannel is null ? -1 : _visibleChannels.IndexOf(SelectedChannel);
+        int targetIndex;
+        if (currentIndex < 0)
+        {
+            targetIndex = delta >= 0 ? 0 : _visibleChannels.Count - 1;
+        }
+        else
+        {
+            targetIndex = (currentIndex + delta) % _visibleChannels.Count;
+            if (targetIndex < 0)
+            {
+                targetIndex += _visibleChannels.Count;
+            }
+        }
+
+        var targetChannel = _visibleChannels[targetIndex];
+        ChannelsListView.SelectedItem = targetChannel;
+        ChannelsListView.ScrollIntoView(targetChannel);
+        await PlaySelectedChannelAsync();
     }
 
     private async Task<bool> PlayRequestAsync(PlaybackRequest request, string successMessage)
@@ -349,6 +413,7 @@ public partial class MainWindow : Window
         }
 
         ApplyRecentStates(_allChannels);
+        ApplyChannelFilter(selectFirstChannel: false);
         UpdateSelectedChannelDetails(channel);
         _settingsStore.Save(CollectSettingsFromUi());
     }
@@ -402,7 +467,25 @@ public partial class MainWindow : Window
         }
     }
 
-    private void StartGuideWarmupForVisibleChannels()
+    private void SearchDebounceTimer_Tick(object? sender, EventArgs e)
+    {
+        _searchDebounceTimer.Stop();
+        ApplyChannelFilter(selectFirstChannel: false);
+    }
+
+    private void GuideWarmupDebounceTimer_Tick(object? sender, EventArgs e)
+    {
+        _guideWarmupDebounceTimer.Stop();
+        StartGuideWarmupForVisibleChannelsCore();
+    }
+
+    private void ScheduleGuideWarmupForVisibleChannels()
+    {
+        _guideWarmupDebounceTimer.Stop();
+        _guideWarmupDebounceTimer.Start();
+    }
+
+    private void StartGuideWarmupForVisibleChannelsCore()
     {
         CancelGuideWarmup();
 
@@ -570,34 +653,39 @@ public partial class MainWindow : Window
 
     private void RefreshGroupOptions()
     {
-        var selectedGroup = GroupFilterComboBox.SelectedItem as string;
+        var selectedGroupValue = SelectedGroupOption?.Value;
 
         _groupOptions.Clear();
-        _groupOptions.Add(AllGroupsLabel);
+        _groupOptions.Add(BuildAllGroupsOption());
 
-        foreach (var group in _allChannels
-                     .Select(channel => channel.GroupTitle.Trim())
-                     .Where(group => !string.IsNullOrWhiteSpace(group))
-                     .Distinct(StringComparer.CurrentCultureIgnoreCase)
-                     .OrderBy(group => group, StringComparer.CurrentCultureIgnoreCase))
+        var options = _allChannels
+            .Where(channel => !string.IsNullOrWhiteSpace(channel.GroupTitle))
+            .GroupBy(channel => channel.GroupTitle.Trim(), StringComparer.CurrentCultureIgnoreCase)
+            .Select(group => new GroupFilterOption(group.Key, group.Key))
+            .OrderBy(option => option.Value, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(option => option.Value, StringComparer.CurrentCultureIgnoreCase);
+
+        foreach (var option in options)
         {
-            _groupOptions.Add(group);
+            _groupOptions.Add(option);
         }
 
-        var restoredSelection = _groupOptions.FirstOrDefault(group => string.Equals(group, selectedGroup, StringComparison.CurrentCultureIgnoreCase));
-        GroupFilterComboBox.SelectedItem = restoredSelection ?? AllGroupsLabel;
+        GroupFilterComboBox.SelectedItem = _groupOptions.FirstOrDefault(option =>
+            string.Equals(option.Value, selectedGroupValue, StringComparison.CurrentCultureIgnoreCase))
+            ?? _groupOptions[0];
     }
 
     private void SelectDefaultGroupIfAvailable()
     {
         if (string.IsNullOrWhiteSpace(_defaultGroup))
         {
-            GroupFilterComboBox.SelectedItem = AllGroupsLabel;
+            GroupFilterComboBox.SelectedItem = _groupOptions[0];
             return;
         }
 
-        var matchedGroup = _groupOptions.FirstOrDefault(group => string.Equals(group, _defaultGroup, StringComparison.CurrentCultureIgnoreCase));
-        GroupFilterComboBox.SelectedItem = matchedGroup ?? AllGroupsLabel;
+        var matchedGroup = _groupOptions.FirstOrDefault(option =>
+            string.Equals(option.Value, _defaultGroup, StringComparison.CurrentCultureIgnoreCase));
+        GroupFilterComboBox.SelectedItem = matchedGroup ?? _groupOptions[0];
     }
 
     private void ApplyChannelFilter(bool selectFirstChannel)
@@ -605,7 +693,7 @@ public partial class MainWindow : Window
         var selectedStream = SelectedChannel?.StreamUri.ToString();
         var preferredChannelKey = selectFirstChannel ? _pendingSelectionChannelKey : string.Empty;
         var searchText = ChannelSearchTextBox.Text.Trim();
-        var selectedGroup = GroupFilterComboBox.SelectedItem as string;
+        var selectedGroup = SelectedGroupOption?.Value;
         var favoritesOnly = FavoritesOnlyCheckBox.IsChecked == true;
         var recentOnly = RecentOnlyCheckBox.IsChecked == true;
 
@@ -655,7 +743,7 @@ public partial class MainWindow : Window
         }
 
         UpdateChannelSummary();
-        StartGuideWarmupForVisibleChannels();
+        ScheduleGuideWarmupForVisibleChannels();
     }
 
     private static bool MatchesSearch(PlaylistChannel channel, string searchText)
@@ -677,7 +765,7 @@ public partial class MainWindow : Window
     {
         return string.IsNullOrWhiteSpace(selectedGroup)
             || string.Equals(selectedGroup, AllGroupsLabel, StringComparison.Ordinal)
-            || string.Equals(channel.GroupTitle, selectedGroup, StringComparison.CurrentCultureIgnoreCase);
+            || string.Equals(channel.GroupTitle.Trim(), selectedGroup, StringComparison.CurrentCultureIgnoreCase);
     }
 
     private void UpdateChannelSummary()
@@ -700,9 +788,10 @@ public partial class MainWindow : Window
             summary += " Recent only.";
         }
 
-        if (!string.IsNullOrWhiteSpace(GroupFilterComboBox.SelectedItem as string) && !string.Equals(GroupFilterComboBox.SelectedItem as string, AllGroupsLabel, StringComparison.Ordinal))
+        if (SelectedGroupOption is { Value: not "" } selectedGroupOption
+            && !string.Equals(selectedGroupOption.Value, AllGroupsLabel, StringComparison.Ordinal))
         {
-            summary += $" Group: {GroupFilterComboBox.SelectedItem}.";
+            summary += $" Group: {selectedGroupOption.Label}.";
         }
 
         summary += _recentChannelKeys.Count > 0 ? $" Recents tracked: {_recentChannelKeys.Count}." : string.Empty;
@@ -776,7 +865,7 @@ public partial class MainWindow : Window
 
     private string FormatDefaultGroup()
     {
-        return string.IsNullOrWhiteSpace(_defaultGroup) ? "All groups" : _defaultGroup;
+        return string.IsNullOrWhiteSpace(_defaultGroup) ? AllGroupsLabel : _defaultGroup;
     }
 
     private void SetLoadingState(bool isLoading)
@@ -804,6 +893,7 @@ public partial class MainWindow : Window
 
     private void CancelGuideWarmup()
     {
+        _guideWarmupDebounceTimer.Stop();
         _guideWarmupCts?.Cancel();
         _guideWarmupCts?.Dispose();
         _guideWarmupCts = null;
@@ -831,8 +921,7 @@ public partial class MainWindow : Window
         }
 
         _settingsStore.Save(CollectSettingsFromUi());
-        UpdateSelectedChannelDetails(selectedChannel);
-        UpdateChannelSummary();
+        ApplyChannelFilter(selectFirstChannel: false);
     }
 
     private void OpenPlayerButton_Click(object sender, RoutedEventArgs e)
@@ -883,26 +972,32 @@ public partial class MainWindow : Window
 
     private void ChannelSearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
-        ApplyChannelFilter(selectFirstChannel: false);
+        _searchDebounceTimer.Stop();
+        _searchDebounceTimer.Start();
     }
 
     private void GroupFilterComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        _searchDebounceTimer.Stop();
         ApplyChannelFilter(selectFirstChannel: false);
     }
 
     private void FavoritesOnlyCheckBox_Click(object sender, RoutedEventArgs e)
     {
+        _searchDebounceTimer.Stop();
         ApplyChannelFilter(selectFirstChannel: false);
     }
 
     private void RecentOnlyCheckBox_Click(object sender, RoutedEventArgs e)
     {
+        _searchDebounceTimer.Stop();
         ApplyChannelFilter(selectFirstChannel: false);
     }
 
     protected override void OnClosed(EventArgs e)
     {
+        _searchDebounceTimer.Stop();
+        _guideWarmupDebounceTimer.Stop();
         _logoWarmupCts?.Cancel();
         _epgLoadCts?.Cancel();
         CancelGuideWarmup();
@@ -911,11 +1006,3 @@ public partial class MainWindow : Window
         base.OnClosed(e);
     }
 }
-
-
-
-
-
-
-
-

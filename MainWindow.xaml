@@ -67,6 +67,7 @@
                     <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Group" />
                     <ComboBox x:Name="GroupFilterComboBox"
                               Height="32"
+                              DisplayMemberPath="Label"
                               SelectionChanged="GroupFilterComboBox_SelectionChanged" />
                 </StackPanel>
 
@@ -333,6 +334,7 @@
         </Border>
     </Grid>
 </Window>
+
 
 
 
