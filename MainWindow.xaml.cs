@@ -136,7 +136,6 @@ public partial class MainWindow : Window
         KeepOnTopCheckBox.IsChecked = settings.KeepPlayerOnTop;
         FavoritesOnlyCheckBox.IsChecked = false;
         RecentOnlyCheckBox.IsChecked = false;
-        ConfiguredDefaultTextBox.Text = FormatDefaultGroup();
     }
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -393,7 +392,7 @@ public partial class MainWindow : Window
     {
         foreach (var channel in channels)
         {
-            var groupInfo = _groupFlagStore.Resolve(channel.GroupTitle);
+            var groupInfo = _groupFlagStore.Resolve(channel.Name, channel.GroupTitle);
             channel.GroupFlag = groupInfo.Flag;
             channel.GroupDisplayTitle = string.IsNullOrWhiteSpace(channel.GroupTitle)
                 ? groupInfo.DisplayTitle
@@ -861,11 +860,6 @@ public partial class MainWindow : Window
         {
             return null;
         }
-    }
-
-    private string FormatDefaultGroup()
-    {
-        return string.IsNullOrWhiteSpace(_defaultGroup) ? AllGroupsLabel : _defaultGroup;
     }
 
     private void SetLoadingState(bool isLoading)

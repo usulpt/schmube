@@ -56,6 +56,12 @@
                         Content="Full"
                         Click="FullScreenButton_Click"
                         ToolTip="Toggle full screen (F or Alt+Enter, Escape to exit)." />
+                <Button x:Name="TakeScreenshotButton"
+                        Width="72"
+                        Margin="0,0,8,0"
+                        Content="Shot"
+                        Click="TakeScreenshotButton_Click"
+                        ToolTip="Save a screenshot of the current frame (Ctrl+S)." />
                 <Button x:Name="ToggleRecordingButton"
                         Width="104"
                         Margin="0,0,8,0"

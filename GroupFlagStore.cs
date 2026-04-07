@@ -14,6 +14,7 @@ public sealed class GroupFlagStore
         PropertyNameCaseInsensitive = true,
         WriteIndented = true
     };
+    private static readonly char[] CountrySeparators = [':', '|', '-', '–', '—'];
 
     private static readonly IReadOnlyDictionary<string, string> CountryAliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -67,52 +68,183 @@ public sealed class GroupFlagStore
         ["TURKEY"] = "TR",
         ["AR"] = "AR",
         ["ARGENTINA"] = "AR",
+        ["AL"] = "AL",
+        ["ALBANIA"] = "AL",
+        ["AT"] = "AT",
+        ["AUSTRIA"] = "AT",
+        ["BA"] = "BA",
+        ["BOSNIA"] = "BA",
+        ["BOSNIAHERZEGOVINA"] = "BA",
+        ["BH"] = "BA",
+        ["BG"] = "BG",
+        ["BULGARIA"] = "BG",
+        ["BO"] = "BO",
+        ["BOLIVIA"] = "BO",
         ["MX"] = "MX",
         ["MEXICO"] = "MX",
         ["CA"] = "CA",
-        ["CANADA"] = "CA"
+        ["CANADA"] = "CA",
+        ["CO"] = "CO",
+        ["COLOMBIA"] = "CO",
+        ["CR"] = "CR",
+        ["COSTARICA"] = "CR",
+        ["CZ"] = "CZ",
+        ["CZECHIA"] = "CZ",
+        ["CZECHREPUBLIC"] = "CZ",
+        ["DO"] = "DO",
+        ["DOMINICANREPUBLIC"] = "DO",
+        ["RD"] = "DO",
+        ["EC"] = "EC",
+        ["ECUADOR"] = "EC",
+        ["RC"] = "EC",
+        ["GE"] = "GE",
+        ["GEORGIA"] = "GE",
+        ["GT"] = "GT",
+        ["GUATEMALA"] = "GT",
+        ["HK"] = "HK",
+        ["HONGKONG"] = "HK",
+        ["HN"] = "HN",
+        ["HONDURAS"] = "HN",
+        ["HR"] = "HR",
+        ["CROATIA"] = "HR",
+        ["HU"] = "HU",
+        ["HUNGARY"] = "HU",
+        ["IE"] = "IE",
+        ["IRELAND"] = "IE",
+        ["IL"] = "IL",
+        ["ISRAEL"] = "IL",
+        ["IR"] = "IR",
+        ["IRAN"] = "IR",
+        ["AU"] = "AU",
+        ["AUSTRALIA"] = "AU",
+        ["NZ"] = "NZ",
+        ["NEWZEALAND"] = "NZ",
+        ["JP"] = "JP",
+        ["JAPAN"] = "JP",
+        ["CN"] = "CN",
+        ["CHINA"] = "CN",
+        ["IN"] = "IN",
+        ["INDIA"] = "IN",
+        ["KH"] = "KH",
+        ["CAMBODIA"] = "KH",
+        ["KR"] = "KR",
+        ["KOREA"] = "KR",
+        ["SOUTHKOREA"] = "KR",
+        ["KZ"] = "KZ",
+        ["KAZAKHSTAN"] = "KZ",
+        ["LT"] = "LT",
+        ["LITHUANIA"] = "LT",
+        ["MK"] = "MK",
+        ["MACEDONIA"] = "MK",
+        ["NORTHMACEDONIA"] = "MK",
+        ["MY"] = "MY",
+        ["MALAYSIA"] = "MY",
+        ["NP"] = "NP",
+        ["NEPAL"] = "NP",
+        ["PA"] = "PA",
+        ["PANAMA"] = "PA",
+        ["PE"] = "PE",
+        ["PERU"] = "PE",
+        ["PR"] = "PE",
+        ["PH"] = "PH",
+        ["PHILIPPINES"] = "PH",
+        ["PK"] = "PK",
+        ["PAKISTAN"] = "PK",
+        ["RU"] = "RU",
+        ["RUSSIA"] = "RU",
+        ["RS"] = "RS",
+        ["SERBIA"] = "RS",
+        ["SR"] = "RS",
+        ["SG"] = "SG",
+        ["SINGAPORE"] = "SG",
+        ["SI"] = "SI",
+        ["SLOVENIA"] = "SI",
+        ["MALTA"] = "MT",
+        ["MT"] = "MT",
+        ["CYPRUS"] = "CY",
+        ["CY"] = "CY",
+        ["TH"] = "TH",
+        ["THAILAND"] = "TH",
+        ["UA"] = "UA",
+        ["UKRAINE"] = "UA",
+        ["UY"] = "UY",
+        ["URUGUAY"] = "UY",
+        ["UZ"] = "UZ",
+        ["UZBEKISTAN"] = "UZ",
+        ["VE"] = "VE",
+        ["VENEZUELA"] = "VE",
+        ["VN"] = "VN",
+        ["VIETNAM"] = "VN"
     };
-
-    private static readonly Regex LeadingCountryCodePattern = new("^([A-Za-z]{2})\\s*\\|", RegexOptions.Compiled);
 
     private readonly string _configPath = Path.Combine(AppContext.BaseDirectory, "schmube.group-flags.json");
     private readonly Lazy<GroupFlagConfig> _config;
+    private readonly Lazy<IReadOnlyDictionary<string, string>> _countryAliases;
 
     public GroupFlagStore()
     {
         _config = new Lazy<GroupFlagConfig>(LoadInternal);
+        _countryAliases = new Lazy<IReadOnlyDictionary<string, string>>(BuildCountryAliases);
     }
 
-    public GroupFlagInfo Resolve(string groupTitle)
+    public GroupFlagInfo Resolve(string title, string? fallbackGroupTitle = null)
     {
-        var trimmedGroupTitle = groupTitle?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(trimmedGroupTitle))
+        var primaryResult = ResolveSingle(title);
+        if (!string.IsNullOrWhiteSpace(primaryResult.Flag) || string.IsNullOrWhiteSpace(fallbackGroupTitle))
+        {
+            return primaryResult;
+        }
+
+        var fallbackResult = ResolveSingle(fallbackGroupTitle);
+        if (!string.IsNullOrWhiteSpace(fallbackResult.Flag))
+        {
+            return fallbackResult;
+        }
+
+        return primaryResult;
+    }
+
+    private GroupFlagInfo ResolveSingle(string title)
+    {
+        var trimmedTitle = title?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmedTitle))
         {
             return new GroupFlagInfo(string.Empty, string.Empty);
         }
 
+        var countrySegment = ExtractCountrySegment(trimmedTitle);
+
         foreach (var rule in _config.Value.Rules)
         {
-            if (!IsMatch(rule, trimmedGroupTitle))
+            if (!IsMatch(rule, trimmedTitle) && !IsMatch(rule, countrySegment))
             {
                 continue;
             }
 
-            var label = string.IsNullOrWhiteSpace(rule.Label) ? BuildDefaultLabel(trimmedGroupTitle) : rule.Label.Trim();
-            return new GroupFlagInfo(BuildFlagCode(rule.CountryCode), label);
+            var label = string.IsNullOrWhiteSpace(rule.Label) ? BuildDefaultLabel(countrySegment) : rule.Label.Trim();
+            if (TryResolveConfiguredCountryCode(rule.CountryCode, out var resolvedCountryCode))
+            {
+                return new GroupFlagInfo(BuildFlagAssetPath(resolvedCountryCode), label);
+            }
         }
 
-        if (TryParseLeadingCountryCode(trimmedGroupTitle, out var prefixedCountryCode))
+        if (TryResolveAlias(countrySegment, out var directCountryCode))
         {
-            return new GroupFlagInfo(BuildFlagCode(prefixedCountryCode), BuildDefaultLabel(trimmedGroupTitle));
+            return new GroupFlagInfo(BuildFlagAssetPath(directCountryCode), BuildDefaultLabel(countrySegment));
         }
 
-        if (TryInferCountryCode(trimmedGroupTitle, out var inferredCountryCode))
+        if (TryInferCountryCode(countrySegment, out var inferredCountryCode))
         {
-            return new GroupFlagInfo(BuildFlagCode(inferredCountryCode), BuildDefaultLabel(trimmedGroupTitle));
+            return new GroupFlagInfo(BuildFlagAssetPath(inferredCountryCode), BuildDefaultLabel(countrySegment));
         }
 
-        return new GroupFlagInfo(string.Empty, trimmedGroupTitle);
+        if (!string.Equals(countrySegment, trimmedTitle, StringComparison.Ordinal)
+            && TryInferCountryCode(trimmedTitle, out inferredCountryCode))
+        {
+            return new GroupFlagInfo(BuildFlagAssetPath(inferredCountryCode), BuildDefaultLabel(trimmedTitle));
+        }
+
+        return new GroupFlagInfo(string.Empty, trimmedTitle);
     }
 
     private GroupFlagConfig LoadInternal()
@@ -148,17 +280,62 @@ public sealed class GroupFlagStore
         };
     }
 
-    private static bool TryParseLeadingCountryCode(string groupTitle, out string countryCode)
+    private IReadOnlyDictionary<string, string> BuildCountryAliases()
+    {
+        var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var alias in CountryAliases)
+        {
+            var normalizedAlias = NormalizeAliasKey(alias.Key);
+            if (!string.IsNullOrWhiteSpace(normalizedAlias))
+            {
+                aliases[normalizedAlias] = alias.Value.Trim().ToUpperInvariant();
+            }
+        }
+
+        foreach (var alias in _config.Value.Aliases)
+        {
+            var normalizedAlias = NormalizeAliasKey(alias.Key);
+            var normalizedCountryCode = NormalizeAliasKey(alias.Value);
+            if (string.IsNullOrWhiteSpace(normalizedAlias) || string.IsNullOrWhiteSpace(normalizedCountryCode))
+            {
+                continue;
+            }
+
+            aliases[normalizedAlias] = normalizedCountryCode;
+        }
+
+        return aliases;
+    }
+
+    private bool TryResolveConfiguredCountryCode(string rawValue, out string countryCode)
     {
         countryCode = string.Empty;
-        var match = LeadingCountryCodePattern.Match(groupTitle);
-        if (!match.Success)
+        var normalized = NormalizeAliasKey(rawValue);
+        if (string.IsNullOrWhiteSpace(normalized))
         {
             return false;
         }
 
-        var prefix = match.Groups[1].Value.Trim().ToUpperInvariant();
-        if (!CountryAliases.TryGetValue(prefix, out var resolvedCountryCode) || string.IsNullOrWhiteSpace(resolvedCountryCode))
+        if (normalized.Length == 2 && normalized.All(ch => ch is >= 'A' and <= 'Z'))
+        {
+            countryCode = normalized;
+            return true;
+        }
+
+        return TryResolveAlias(normalized, out countryCode);
+    }
+
+    private bool TryResolveAlias(string rawValue, out string countryCode)
+    {
+        countryCode = string.Empty;
+        var normalized = NormalizeAliasKey(rawValue);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        if (!_countryAliases.Value.TryGetValue(normalized, out var resolvedCountryCode) || string.IsNullOrWhiteSpace(resolvedCountryCode))
         {
             return false;
         }
@@ -167,7 +344,7 @@ public sealed class GroupFlagStore
         return true;
     }
 
-    private static bool TryInferCountryCode(string groupTitle, out string countryCode)
+    private bool TryInferCountryCode(string groupTitle, out string countryCode)
     {
         countryCode = string.Empty;
         var normalized = Regex.Replace(groupTitle.ToUpperInvariant(), "[^A-Z0-9]+", " ").Trim();
@@ -179,9 +356,9 @@ public sealed class GroupFlagStore
         var tokens = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         foreach (var candidate in BuildCandidates(tokens))
         {
-            if (CountryAliases.TryGetValue(candidate, out var resolvedCountryCode) && !string.IsNullOrWhiteSpace(resolvedCountryCode))
+            if (TryResolveAlias(candidate, out var resolvedCountryCode))
             {
-                countryCode = resolvedCountryCode!;
+                countryCode = resolvedCountryCode;
                 return true;
             }
         }
@@ -209,15 +386,44 @@ public sealed class GroupFlagStore
         }
     }
 
+    private static string ExtractCountrySegment(string title)
+    {
+        var trimmedTitle = title.Trim();
+        if (string.IsNullOrWhiteSpace(trimmedTitle))
+        {
+            return string.Empty;
+        }
+
+        var separatorIndex = trimmedTitle.IndexOfAny(CountrySeparators);
+        if (separatorIndex <= 0)
+        {
+            return trimmedTitle;
+        }
+
+        // Only trust early separators as country/name split markers.
+        if (separatorIndex > 18)
+        {
+            return trimmedTitle;
+        }
+
+        var segment = trimmedTitle[..separatorIndex].Trim();
+        return string.IsNullOrWhiteSpace(segment) ? trimmedTitle : segment;
+    }
+
     private static string BuildDefaultLabel(string groupTitle)
     {
-        var separatorIndex = groupTitle.IndexOf('|');
+        var separatorIndex = groupTitle.IndexOfAny(CountrySeparators);
         return separatorIndex > 0
             ? groupTitle[..separatorIndex].Trim()
             : groupTitle.Trim();
     }
 
-    private static string BuildFlagCode(string countryCode)
+    private static string NormalizeAliasKey(string value)
+    {
+        return Regex.Replace((value ?? string.Empty).ToUpperInvariant(), "[^A-Z0-9]+", string.Empty).Trim();
+    }
+
+    private static string BuildFlagAssetPath(string countryCode)
     {
         var normalized = (countryCode ?? string.Empty).Trim().ToUpperInvariant();
         if (normalized.Length != 2 || normalized.Any(ch => ch is < 'A' or > 'Z'))
@@ -225,7 +431,13 @@ public sealed class GroupFlagStore
             return string.Empty;
         }
 
-        return normalized;
+        var assetPath = Path.Combine(
+            AppContext.BaseDirectory,
+            "Assets",
+            "Flags",
+            $"{normalized.ToLowerInvariant()}.png");
+
+        return File.Exists(assetPath) ? assetPath : string.Empty;
     }
 }
 
@@ -234,6 +446,8 @@ public sealed record GroupFlagInfo(string Flag, string DisplayTitle);
 public sealed class GroupFlagConfig
 {
     public List<GroupFlagRule> Rules { get; set; } = [];
+
+    public Dictionary<string, string> Aliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed class GroupFlagRule
@@ -246,5 +460,3 @@ public sealed class GroupFlagRule
 
     public string Label { get; set; } = string.Empty;
 }
-
-

@@ -15,6 +15,7 @@ public partial class PlayerWindow : Window
     private const int MaxReconnectAttempts = 3;
     private const int DefaultVolume = 100;
     private const int VolumeStep = 10;
+    private const string ScreenshotsFolderName = "Schmube\\Screenshots";
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(3);
 
     private readonly LibVLC _libVlc;
@@ -62,6 +63,7 @@ public partial class PlayerWindow : Window
 
         UpdateRecordingVisualState();
         UpdateAudioVisualState();
+        UpdateScreenshotButtonState();
     }
 
     public Task PlayAsync(PlaybackRequest request)
@@ -81,6 +83,7 @@ public partial class PlayerWindow : Window
             StartPlaybackCore(request, isReconnect: false);
             UpdateRecordingVisualState();
             UpdateAudioVisualState();
+            UpdateScreenshotButtonState();
         }).Task;
     }
 
@@ -99,6 +102,8 @@ public partial class PlayerWindow : Window
         {
             SetStatus("Stopped.");
         }
+
+        UpdateScreenshotButtonState();
     }
 
     public void SetAlwaysOnTop(bool isOnTop)
@@ -335,6 +340,11 @@ public partial class PlayerWindow : Window
         UpdateRecordingVisualState();
     }
 
+    private void UpdateScreenshotButtonState()
+    {
+        TakeScreenshotButton.IsEnabled = _currentRequest is not null;
+    }
+
     private void UpdateRecordingVisualState()
     {
         ToggleRecordingButton.IsEnabled = _currentRequest is not null;
@@ -454,6 +464,11 @@ public partial class PlayerWindow : Window
         ToggleFullScreen();
     }
 
+    private void TakeScreenshotButton_Click(object sender, RoutedEventArgs e)
+    {
+        TakeScreenshot();
+    }
+
     private void VideoSurface_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ClickCount != 2)
@@ -484,6 +499,13 @@ public partial class PlayerWindow : Window
         if (e.Key == Key.M)
         {
             ToggleMute();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.S && Keyboard.Modifiers == ModifierKeys.Control)
+        {
+            TakeScreenshot();
             e.Handled = true;
             return;
         }
@@ -521,6 +543,31 @@ public partial class PlayerWindow : Window
         Stop();
     }
 
+    private void TakeScreenshot()
+    {
+        if (_currentRequest is null || !_mediaPlayer.IsPlaying)
+        {
+            SetStatus("Start playback before taking a screenshot.");
+            return;
+        }
+
+        try
+        {
+            var screenshotsDirectory = ResolveScreenshotsDirectory();
+            Directory.CreateDirectory(screenshotsDirectory);
+
+            var screenshotPath = Path.Combine(screenshotsDirectory, BuildScreenshotFileName(_currentRequest.DisplayName));
+            var success = _mediaPlayer.TakeSnapshot(0, screenshotPath, 0, 0);
+            SetStatus(success
+                ? $"Screenshot saved to {screenshotPath}"
+                : "Screenshot failed.");
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Screenshot failed: {ex.Message}");
+        }
+    }
+
     private void SetStatus(string status)
     {
         if (Dispatcher.CheckAccess())
@@ -530,6 +577,29 @@ public partial class PlayerWindow : Window
         }
 
         Dispatcher.BeginInvoke(() => StatusText.Text = status);
+    }
+
+    private static string ResolveScreenshotsDirectory()
+    {
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
+            ScreenshotsFolderName);
+    }
+
+    private static string BuildScreenshotFileName(string displayName)
+    {
+        var invalidCharacters = Path.GetInvalidFileNameChars().ToHashSet();
+        var sanitized = new string(displayName
+            .Select(ch => invalidCharacters.Contains(ch) ? '_' : ch)
+            .ToArray())
+            .Trim();
+
+        if (string.IsNullOrWhiteSpace(sanitized))
+        {
+            sanitized = "channel";
+        }
+
+        return $"{DateTime.Now:yyyyMMdd_HHmmss}_{sanitized}.png";
     }
 
     protected override void OnClosed(EventArgs e)

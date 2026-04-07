@@ -165,10 +165,6 @@
                         <TextBox x:Name="SelectedChannelIdTextBox"
                                  Style="{StaticResource SelectableInfoTextBoxStyle}" />
 
-                        <TextBlock FontWeight="SemiBold" Text="Configured Default Group" />
-                        <TextBox x:Name="ConfiguredDefaultTextBox"
-                                 Style="{StaticResource SelectableInfoTextBoxStyle}" />
-
                         <TextBlock FontWeight="SemiBold" Text="Program Guide" />
                         <TextBox x:Name="ProgramGuideStatusTextBox"
                                  Style="{StaticResource SelectableInfoTextBoxStyle}"
@@ -237,13 +233,15 @@
                         <GridView AllowsColumnReorder="False">
                             <GridViewColumn Header="Fav" Width="38" DisplayMemberBinding="{Binding FavoriteMarker}" />
                             <GridViewColumn Header="Recent" Width="52" DisplayMemberBinding="{Binding RecentMarker}" />
-                            <GridViewColumn Header="Flag" Width="76">
+                            <GridViewColumn Header="Flag" Width="56">
                                 <GridViewColumn.CellTemplate>
                                     <DataTemplate>
-                                        <Border Padding="6,2"
-                                                CornerRadius="4"
-                                                Background="#22354A"
-                                                BorderBrush="#486A86"
+                                        <Border Width="36"
+                                                Height="24"
+                                                Padding="0"
+                                                CornerRadius="6"
+                                                Background="#FFFFFF"
+                                                BorderBrush="#D1D5DB"
                                                 BorderThickness="1"
                                                 HorizontalAlignment="Center"
                                                 VerticalAlignment="Center">
@@ -257,12 +255,10 @@
                                                     </Style.Triggers>
                                                 </Style>
                                             </Border.Style>
-                                            <TextBlock Text="{Binding GroupFlag}"
-                                                       FontSize="11"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="#F2F7FB"
-                                                       HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center" />
+                                            <Image Width="32"
+                                                   Height="22"
+                                                   Stretch="UniformToFill"
+                                                   Source="{Binding GroupFlag}" />
                                         </Border>
                                     </DataTemplate>
                                 </GridViewColumn.CellTemplate>
