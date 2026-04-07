@@ -23,6 +23,7 @@ public sealed class GroupFlagStore
         "NOSIGNAL",
         "OFFLINE"
     ];
+    private static readonly char[] GroupSeparators = [':', '|', '-', '–', '—', '/'];
 
     private static readonly IReadOnlyDictionary<string, string> CountryAliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -74,8 +75,7 @@ public sealed class GroupFlagStore
         ["GREECE"] = "GR",
         ["TR"] = "TR",
         ["TURKEY"] = "TR",
-        ["AR"] = "AR",
-        ["ARGENTINA"] = "AR",
+        ["ARGENTINA"] = "ARG",
         ["AL"] = "AL",
         ["ALBANIA"] = "AL",
         ["AT"] = "AT",
@@ -221,6 +221,16 @@ public sealed class GroupFlagStore
         }
 
         if (IsIgnoredStatusTitle(trimmedTitle))
+        {
+            return new GroupFlagInfo(string.Empty, trimmedTitle);
+        }
+
+        if (TryResolveArabicRegionalCountry(trimmedTitle, out var arabicRegionalResult))
+        {
+            return arabicRegionalResult;
+        }
+
+        if (IsArabicRegionalMarkerTitle(trimmedTitle))
         {
             return new GroupFlagInfo(string.Empty, trimmedTitle);
         }
@@ -441,6 +451,52 @@ public sealed class GroupFlagStore
     {
         var normalized = NormalizeAliasKey(title);
         return IgnoredStatusPrefixes.Any(prefix => normalized.StartsWith(prefix, StringComparison.Ordinal));
+    }
+
+    private bool TryResolveArabicRegionalCountry(string title, out GroupFlagInfo result)
+    {
+        result = new GroupFlagInfo(string.Empty, title);
+        if (!IsArabicRegionalMarkerTitle(title))
+        {
+            return false;
+        }
+
+        var segments = title
+            .Split(GroupSeparators, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Skip(1);
+
+        foreach (var segment in segments)
+        {
+            if (TryResolveAlias(segment, out var directCountryCode))
+            {
+                result = new GroupFlagInfo(BuildFlagAssetPath(directCountryCode), BuildDefaultLabel(segment));
+                return true;
+            }
+
+            if (TryInferCountryCode(segment, out var inferredCountryCode))
+            {
+                result = new GroupFlagInfo(BuildFlagAssetPath(inferredCountryCode), BuildDefaultLabel(segment));
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsArabicRegionalMarkerTitle(string title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return false;
+        }
+
+        var trimmedTitle = title.Trim();
+        return trimmedTitle.StartsWith("AR|", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("AR:", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("AR/", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("AR -", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("AR –", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("AR —", StringComparison.CurrentCultureIgnoreCase);
     }
 
     private static string ExtractCountrySegment(string title)

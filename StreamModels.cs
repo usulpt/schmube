@@ -62,6 +62,7 @@ public sealed class PlaylistChannel : INotifyPropertyChanged
     private string _nextTitle = string.Empty;
     private string _groupFlag = string.Empty;
     private string _groupDisplayTitle = string.Empty;
+    private string _canonicalGroupKey = string.Empty;
 
     public required string Name { get; init; }
 
@@ -127,6 +128,12 @@ public sealed class PlaylistChannel : INotifyPropertyChanged
     {
         get => _groupDisplayTitle;
         set => SetField(ref _groupDisplayTitle, value);
+    }
+
+    public string CanonicalGroupKey
+    {
+        get => _canonicalGroupKey;
+        set => SetField(ref _canonicalGroupKey, value);
     }
 
     public string FavoriteKey => string.IsNullOrWhiteSpace(TvgId) ? StreamUri.ToString() : TvgId;

@@ -23,6 +23,7 @@ public partial class MainWindow : Window
     private readonly SettingsStore _settingsStore = new();
     private readonly AppConfigStore _appConfigStore = new();
     private readonly GroupFlagStore _groupFlagStore = new();
+    private readonly CanonicalGroupService _canonicalGroupService = new();
     private readonly PlaylistService _playlistService = new();
     private readonly LogoCacheService _logoCacheService = new();
     private readonly EpgService _epgService = new();
@@ -87,7 +88,7 @@ public partial class MainWindow : Window
         RegisterFocusHint(StreamUrlTextBox, "Source URL for your playlist or direct stream. Paste it here or keep using the saved config value.");
         RegisterFocusHint(KeepOnTopCheckBox, "Keep the separate player window above your other apps while you watch.");
         RegisterFocusHint(ChannelSearchTextBox, "Filter the loaded channels by name, group, channel ID, or the live guide preview.");
-        RegisterFocusHint(GroupFilterComboBox, "Limit the channel list to one group after the playlist finishes loading.");
+        RegisterFocusHint(GroupFilterComboBox, "Limit the channel list to one normalized group after the playlist finishes loading.");
         RegisterFocusHint(FavoritesOnlyCheckBox, "Show only channels you have marked as favorites.");
         RegisterFocusHint(RecentOnlyCheckBox, "Show only channels you played recently.");
         RegisterFocusHint(LoadChannelsButton, "Load or refresh the channel list from the configured source.");
@@ -399,10 +400,10 @@ public partial class MainWindow : Window
         foreach (var channel in channels)
         {
             var groupInfo = _groupFlagStore.Resolve(channel.Name, channel.GroupTitle);
+            var canonicalGroup = _canonicalGroupService.Resolve(channel, groupInfo);
             channel.GroupFlag = groupInfo.Flag;
-            channel.GroupDisplayTitle = string.IsNullOrWhiteSpace(channel.GroupTitle)
-                ? groupInfo.DisplayTitle
-                : channel.GroupTitle;
+            channel.GroupDisplayTitle = canonicalGroup.Label;
+            channel.CanonicalGroupKey = canonicalGroup.Key;
         }
     }
 
@@ -664,10 +665,14 @@ public partial class MainWindow : Window
         _groupOptions.Add(BuildAllGroupsOption());
 
         var options = _allChannels
-            .Where(channel => !string.IsNullOrWhiteSpace(channel.GroupTitle))
-            .GroupBy(channel => channel.GroupTitle.Trim(), StringComparer.CurrentCultureIgnoreCase)
-            .Select(group => new GroupFilterOption(group.Key, group.Key))
-            .OrderBy(option => option.Value, StringComparer.CurrentCultureIgnoreCase)
+            .Where(channel => !string.IsNullOrWhiteSpace(channel.CanonicalGroupKey))
+            .GroupBy(channel => channel.CanonicalGroupKey.Trim(), StringComparer.CurrentCultureIgnoreCase)
+            .Select(group => new GroupFilterOption(
+                group.Key,
+                group.Select(channel => channel.GroupDisplayTitle?.Trim())
+                    .FirstOrDefault(label => !string.IsNullOrWhiteSpace(label))
+                    ?? group.Key))
+            .OrderBy(option => option.Label, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(option => option.Value, StringComparer.CurrentCultureIgnoreCase);
 
         foreach (var option in options)
@@ -689,7 +694,8 @@ public partial class MainWindow : Window
         }
 
         var matchedGroup = _groupOptions.FirstOrDefault(option =>
-            string.Equals(option.Value, _defaultGroup, StringComparison.CurrentCultureIgnoreCase));
+            string.Equals(option.Value, _defaultGroup, StringComparison.CurrentCultureIgnoreCase)
+            || string.Equals(option.Label, _defaultGroup, StringComparison.CurrentCultureIgnoreCase));
         GroupFilterComboBox.SelectedItem = matchedGroup ?? _groupOptions[0];
     }
 
@@ -716,7 +722,7 @@ public partial class MainWindow : Window
             : filteredChannels
                 .OrderByDescending(channel => channel.IsFavorite)
                 .ThenBy(channel => recentOnly ? channel.RecentRank : int.MaxValue)
-                .ThenBy(channel => channel.GroupTitle, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(channel => channel.GroupDisplayTitle, StringComparer.CurrentCultureIgnoreCase)
                 .ThenBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase);
 
         _visibleChannels.Clear();
@@ -776,7 +782,7 @@ public partial class MainWindow : Window
     {
         return string.IsNullOrWhiteSpace(selectedGroup)
             || string.Equals(selectedGroup, AllGroupsLabel, StringComparison.Ordinal)
-            || string.Equals(channel.GroupTitle.Trim(), selectedGroup, StringComparison.CurrentCultureIgnoreCase);
+            || string.Equals(channel.CanonicalGroupKey.Trim(), selectedGroup, StringComparison.CurrentCultureIgnoreCase);
     }
 
     private void UpdateChannelSummary()
@@ -872,9 +878,7 @@ public partial class MainWindow : Window
 
         SelectedChannelNameTextBox.Text = channel.Name;
         SelectedChannelFavoriteStateTextBox.Text = BuildChannelStateText(channel);
-        SelectedChannelGroupTextBox.Text = string.IsNullOrWhiteSpace(channel.GroupTitle)
-            ? "Ungrouped"
-            : channel.GroupTitle;
+        SelectedChannelGroupTextBox.Text = BuildChannelGroupText(channel);
         SelectedChannelIdTextBox.Text = string.IsNullOrWhiteSpace(channel.TvgId)
             ? channel.StreamId?.ToString() ?? "Not available"
             : channel.TvgId;
@@ -901,6 +905,18 @@ public partial class MainWindow : Window
         }
 
         return string.Join(" | ", stateParts);
+    }
+
+    private static string BuildChannelGroupText(PlaylistChannel channel)
+    {
+        var canonicalGroup = string.IsNullOrWhiteSpace(channel.GroupDisplayTitle)
+            ? "Ungrouped"
+            : channel.GroupDisplayTitle.Trim();
+        var rawGroup = channel.GroupTitle?.Trim() ?? string.Empty;
+
+        return string.IsNullOrWhiteSpace(rawGroup) || string.Equals(rawGroup, canonicalGroup, StringComparison.CurrentCultureIgnoreCase)
+            ? canonicalGroup
+            : $"{canonicalGroup} (source: {rawGroup})";
     }
 
     private static ImageSource? CreateLogoSource(string logoSource)

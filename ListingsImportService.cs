@@ -361,6 +361,11 @@ public sealed class ListingsImportService
             }
         }
 
+        if (HasArabicRegionalGroupContext(channel))
+        {
+            countryCodes.Remove("AR");
+        }
+
         return countryCodes;
     }
 
@@ -435,7 +440,10 @@ public sealed class ListingsImportService
         if (!string.IsNullOrWhiteSpace(channel.Name))
         {
             var prefix = channel.Name.Split([':', '|', '-', '–', '—', '/'], 2, StringSplitOptions.TrimEntries)[0];
-            yield return prefix;
+            if (!IsArabicRegionalMarker(prefix, channel.Name))
+            {
+                yield return prefix;
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(channel.GroupFlag))
@@ -465,6 +473,11 @@ public sealed class ListingsImportService
 
     private static HashSet<string> ResolveCountryCodes(string source)
     {
+        if (TryResolveArabicRegionalCountryCodes(source, out var arabicRegionalCodes))
+        {
+            return arabicRegionalCodes;
+        }
+
         var segmentedCountryCodes = ResolveCountryCodesFromSegments(source);
         if (segmentedCountryCodes.Count > 0)
         {
@@ -488,6 +501,29 @@ public sealed class ListingsImportService
         }
 
         return countryCodes;
+    }
+
+    private static bool TryResolveArabicRegionalCountryCodes(string source, out HashSet<string> countryCodes)
+    {
+        countryCodes = [];
+        if (!IsArabicRegionalMarker(source, source))
+        {
+            return false;
+        }
+
+        var segments = source
+            .Split(['|', ':', '-', '–', '—', '/'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Skip(1);
+
+        foreach (var segment in segments)
+        {
+            foreach (var code in ResolveCountryCodesFromTokens(segment))
+            {
+                countryCodes.Add(code);
+            }
+        }
+
+        return true;
     }
 
     private static HashSet<string> ResolveCountryCodesFromSegments(string source)
@@ -557,6 +593,34 @@ public sealed class ListingsImportService
     {
         var normalized = Normalize(source);
         return normalized.Length >= 3 || source.Any(char.IsWhiteSpace);
+    }
+
+    private static bool HasArabicRegionalGroupContext(PlaylistChannel channel)
+    {
+        return IsArabicRegionalMarker(channel.GroupTitle, channel.GroupTitle)
+            || IsArabicRegionalMarker(channel.GroupDisplayTitle, channel.GroupDisplayTitle);
+    }
+
+    private static bool IsArabicRegionalMarker(string value, string fullSource)
+    {
+        if (string.IsNullOrWhiteSpace(fullSource))
+        {
+            return false;
+        }
+
+        var trimmedSource = fullSource.Trim();
+        if (trimmedSource.StartsWith("AR|", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedSource.StartsWith("AR:", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedSource.StartsWith("AR/", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedSource.StartsWith("AR -", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedSource.StartsWith("AR –", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedSource.StartsWith("AR —", StringComparison.CurrentCultureIgnoreCase))
+        {
+            return true;
+        }
+
+        return string.Equals(Normalize(value), "AR", StringComparison.Ordinal)
+            && (trimmedSource.Contains('|') || trimmedSource.Contains(':') || trimmedSource.Contains('/'));
     }
 
     private static IReadOnlyDictionary<string, string> BuildCountryAliasMap()
