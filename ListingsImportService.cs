@@ -465,6 +465,12 @@ public sealed class ListingsImportService
 
     private static HashSet<string> ResolveCountryCodes(string source)
     {
+        var segmentedCountryCodes = ResolveCountryCodesFromSegments(source);
+        if (segmentedCountryCodes.Count > 0)
+        {
+            return segmentedCountryCodes;
+        }
+
         var countryCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var token in EnumerateCountryTokens(source))
@@ -482,6 +488,75 @@ public sealed class ListingsImportService
         }
 
         return countryCodes;
+    }
+
+    private static HashSet<string> ResolveCountryCodesFromSegments(string source)
+    {
+        if (string.IsNullOrWhiteSpace(source) || !source.Contains('|'))
+        {
+            return [];
+        }
+
+        var segments = source
+            .Split('|', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Select(segment => new
+            {
+                Segment = segment,
+                Codes = ResolveCountryCodesFromTokens(segment)
+            })
+            .Where(item => item.Codes.Count > 0)
+            .ToList();
+
+        if (segments.Count == 0)
+        {
+            return [];
+        }
+
+        var explicitSegmentCodes = segments
+            .Where(item => HasExplicitCountrySignal(item.Segment))
+            .SelectMany(item => item.Codes)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (explicitSegmentCodes.Count > 0)
+        {
+            return explicitSegmentCodes;
+        }
+
+        var laterSegmentCodes = segments
+            .Skip(1)
+            .SelectMany(item => item.Codes)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return laterSegmentCodes.Count > 0
+            ? laterSegmentCodes
+            : segments.SelectMany(item => item.Codes).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static HashSet<string> ResolveCountryCodesFromTokens(string source)
+    {
+        var countryCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var token in EnumerateCountryTokens(source))
+        {
+            var normalized = Normalize(token);
+            if (normalized.Length == 0)
+            {
+                continue;
+            }
+
+            if (CountryAliasMap.TryGetValue(normalized, out var code))
+            {
+                countryCodes.Add(code);
+            }
+        }
+
+        return countryCodes;
+    }
+
+    private static bool HasExplicitCountrySignal(string source)
+    {
+        var normalized = Normalize(source);
+        return normalized.Length >= 3 || source.Any(char.IsWhiteSpace);
     }
 
     private static IReadOnlyDictionary<string, string> BuildCountryAliasMap()

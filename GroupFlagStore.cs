@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -15,6 +16,13 @@ public sealed class GroupFlagStore
         WriteIndented = true
     };
     private static readonly char[] CountrySeparators = [':', '|', '-', '–', '—'];
+    private static readonly string[] IgnoredStatusPrefixes =
+    [
+        "NOEVENT",
+        "NOSTREAM",
+        "NOSIGNAL",
+        "OFFLINE"
+    ];
 
     private static readonly IReadOnlyDictionary<string, string> CountryAliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -212,6 +220,11 @@ public sealed class GroupFlagStore
             return new GroupFlagInfo(string.Empty, string.Empty);
         }
 
+        if (IsIgnoredStatusTitle(trimmedTitle))
+        {
+            return new GroupFlagInfo(string.Empty, trimmedTitle);
+        }
+
         var countrySegment = ExtractCountrySegment(trimmedTitle);
 
         foreach (var rule in _config.Value.Rules)
@@ -228,20 +241,17 @@ public sealed class GroupFlagStore
             }
         }
 
-        if (TryResolveAlias(countrySegment, out var directCountryCode))
+        foreach (var candidate in EnumerateCountryCandidates(trimmedTitle, countrySegment))
         {
-            return new GroupFlagInfo(BuildFlagAssetPath(directCountryCode), BuildDefaultLabel(countrySegment));
-        }
+            if (TryResolveAlias(candidate, out var directCountryCode))
+            {
+                return new GroupFlagInfo(BuildFlagAssetPath(directCountryCode), BuildDefaultLabel(candidate));
+            }
 
-        if (TryInferCountryCode(countrySegment, out var inferredCountryCode))
-        {
-            return new GroupFlagInfo(BuildFlagAssetPath(inferredCountryCode), BuildDefaultLabel(countrySegment));
-        }
-
-        if (!string.Equals(countrySegment, trimmedTitle, StringComparison.Ordinal)
-            && TryInferCountryCode(trimmedTitle, out inferredCountryCode))
-        {
-            return new GroupFlagInfo(BuildFlagAssetPath(inferredCountryCode), BuildDefaultLabel(trimmedTitle));
+            if (TryInferCountryCode(candidate, out var inferredCountryCode))
+            {
+                return new GroupFlagInfo(BuildFlagAssetPath(inferredCountryCode), BuildDefaultLabel(candidate));
+            }
         }
 
         return new GroupFlagInfo(string.Empty, trimmedTitle);
@@ -284,25 +294,30 @@ public sealed class GroupFlagStore
     {
         var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
+        foreach (var culture in CultureInfo.GetCultures(CultureTypes.SpecificCultures))
+        {
+            try
+            {
+                var region = new RegionInfo(culture.Name);
+                AddCountryAlias(aliases, region.TwoLetterISORegionName, region.TwoLetterISORegionName);
+                AddCountryAlias(aliases, region.ThreeLetterISORegionName, region.TwoLetterISORegionName);
+                AddCountryAlias(aliases, region.EnglishName, region.TwoLetterISORegionName);
+                AddCountryAlias(aliases, region.NativeName, region.TwoLetterISORegionName);
+                AddCountryAlias(aliases, region.Name, region.TwoLetterISORegionName);
+            }
+            catch
+            {
+            }
+        }
+
         foreach (var alias in CountryAliases)
         {
-            var normalizedAlias = NormalizeAliasKey(alias.Key);
-            if (!string.IsNullOrWhiteSpace(normalizedAlias))
-            {
-                aliases[normalizedAlias] = alias.Value.Trim().ToUpperInvariant();
-            }
+            AddCountryAlias(aliases, alias.Key, alias.Value);
         }
 
         foreach (var alias in _config.Value.Aliases)
         {
-            var normalizedAlias = NormalizeAliasKey(alias.Key);
-            var normalizedCountryCode = NormalizeAliasKey(alias.Value);
-            if (string.IsNullOrWhiteSpace(normalizedAlias) || string.IsNullOrWhiteSpace(normalizedCountryCode))
-            {
-                continue;
-            }
-
-            aliases[normalizedAlias] = normalizedCountryCode;
+            AddCountryAlias(aliases, alias.Key, alias.Value);
         }
 
         return aliases;
@@ -386,6 +401,48 @@ public sealed class GroupFlagStore
         }
     }
 
+    private static IEnumerable<string> EnumerateCountryCandidates(string title, string countrySegment)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var segment in title
+                     .Split(CountrySeparators, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                     .OrderByDescending(GetCountryCandidatePriority))
+        {
+            if (seen.Add(segment))
+            {
+                yield return segment;
+            }
+        }
+
+        if (seen.Add(title))
+        {
+            yield return title;
+        }
+
+        if (!string.IsNullOrWhiteSpace(countrySegment) && seen.Add(countrySegment))
+        {
+            yield return countrySegment;
+        }
+    }
+
+    private static int GetCountryCandidatePriority(string value)
+    {
+        var normalized = NormalizeAliasKey(value);
+        if (normalized.Length == 0)
+        {
+            return 0;
+        }
+
+        return normalized.Length + (normalized.Length > 3 ? 100 : 0);
+    }
+
+    private static bool IsIgnoredStatusTitle(string title)
+    {
+        var normalized = NormalizeAliasKey(title);
+        return IgnoredStatusPrefixes.Any(prefix => normalized.StartsWith(prefix, StringComparison.Ordinal));
+    }
+
     private static string ExtractCountrySegment(string title)
     {
         var trimmedTitle = title.Trim();
@@ -421,6 +478,18 @@ public sealed class GroupFlagStore
     private static string NormalizeAliasKey(string value)
     {
         return Regex.Replace((value ?? string.Empty).ToUpperInvariant(), "[^A-Z0-9]+", string.Empty).Trim();
+    }
+
+    private static void AddCountryAlias(IDictionary<string, string> aliases, string alias, string countryCode)
+    {
+        var normalizedAlias = NormalizeAliasKey(alias);
+        var normalizedCountryCode = NormalizeAliasKey(countryCode);
+        if (string.IsNullOrWhiteSpace(normalizedAlias) || normalizedCountryCode.Length != 2)
+        {
+            return;
+        }
+
+        aliases[normalizedAlias] = normalizedCountryCode;
     }
 
     private static string BuildFlagAssetPath(string countryCode)
