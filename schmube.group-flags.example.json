@@ -1,4 +1,12 @@
 {
+  "aliases": {
+    "CG": "ME",
+    "MA": "MT",
+    "SU": "SR",
+    "TN": "TW",
+    "KU": "KU",
+    "AG": "AF"
+  },
   "rules": [
     {
       "match": "VIP SPORTS",

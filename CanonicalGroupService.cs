@@ -12,11 +12,21 @@ public sealed class CanonicalGroupService
 
     public CanonicalGroupInfo Resolve(PlaylistChannel channel, GroupFlagInfo groupFlagInfo)
     {
+        if (IsRelaxChannel(channel))
+        {
+            return new CanonicalGroupInfo("RELAX", "Relax");
+        }
+
         var countryCode = GetCountryCodeFromFlag(groupFlagInfo.Flag);
         if (!string.IsNullOrWhiteSpace(countryCode))
         {
             var countryLabel = GetCountryLabel(countryCode, groupFlagInfo.DisplayTitle);
             return new CanonicalGroupInfo(countryCode, countryLabel);
+        }
+
+        if (IsAfricaRegionalGroup(channel.GroupTitle))
+        {
+            return new CanonicalGroupInfo("AFRICA", "Africa");
         }
 
         var rawGroupLabel = CleanLabel(channel.GroupTitle);
@@ -36,6 +46,11 @@ public sealed class CanonicalGroupService
 
     private static string GetCountryLabel(string countryCode, string fallback)
     {
+        if (string.Equals(countryCode, "KU", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Kurdistan";
+        }
+
         try
         {
             var region = new RegionInfo(countryCode);
@@ -48,6 +63,36 @@ public sealed class CanonicalGroupService
                 ? countryCode.ToUpperInvariant()
                 : cleanedFallback;
         }
+    }
+
+    private static bool IsRelaxChannel(PlaylistChannel channel)
+    {
+        var name = channel.Name?.Trim() ?? string.Empty;
+        var group = channel.GroupTitle?.Trim() ?? string.Empty;
+
+        return name.StartsWith("RX:", StringComparison.CurrentCultureIgnoreCase)
+            || name.StartsWith("RX|", StringComparison.CurrentCultureIgnoreCase)
+            || name.StartsWith("RX/", StringComparison.CurrentCultureIgnoreCase)
+            || name.StartsWith("RX -", StringComparison.CurrentCultureIgnoreCase)
+            || name.StartsWith("RX –", StringComparison.CurrentCultureIgnoreCase)
+            || name.StartsWith("RX —", StringComparison.CurrentCultureIgnoreCase)
+            || group.StartsWith("4K| RELAX", StringComparison.CurrentCultureIgnoreCase)
+            || group.StartsWith("4K: RELAX", StringComparison.CurrentCultureIgnoreCase)
+            || group.StartsWith("4K/ RELAX", StringComparison.CurrentCultureIgnoreCase)
+            || group.StartsWith("4K - RELAX", StringComparison.CurrentCultureIgnoreCase)
+            || group.StartsWith("4K – RELAX", StringComparison.CurrentCultureIgnoreCase)
+            || group.StartsWith("4K — RELAX", StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private static bool IsAfricaRegionalGroup(string? groupTitle)
+    {
+        var group = groupTitle?.Trim() ?? string.Empty;
+        return group.StartsWith("AFR|", StringComparison.CurrentCultureIgnoreCase)
+            || group.StartsWith("AFR:", StringComparison.CurrentCultureIgnoreCase)
+            || group.StartsWith("AFR/", StringComparison.CurrentCultureIgnoreCase)
+            || group.StartsWith("AFR -", StringComparison.CurrentCultureIgnoreCase)
+            || group.StartsWith("AFR –", StringComparison.CurrentCultureIgnoreCase)
+            || group.StartsWith("AFR —", StringComparison.CurrentCultureIgnoreCase);
     }
 
     private static string CleanLabel(string value)

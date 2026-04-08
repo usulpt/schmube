@@ -13,6 +13,7 @@ namespace Schmube;
 public sealed class PlaylistService
 {
     private static readonly Regex AttributeRegex = new("(?<key>[A-Za-z0-9-]+)=\"(?<value>[^\"]*)\"", RegexOptions.Compiled);
+    private const string HiddenChannelMarker = "###";
     private readonly HttpClient _httpClient = new()
     {
         Timeout = TimeSpan.FromSeconds(30)
@@ -131,11 +132,18 @@ public sealed class PlaylistService
                 continue;
             }
 
+            var channelName = string.IsNullOrWhiteSpace(currentMetadata?.Name) ? BuildChannelName(streamUri) : currentMetadata.Name;
+            if (ShouldSkipChannel(channelName))
+            {
+                currentMetadata = null;
+                continue;
+            }
+
             var logo = currentMetadata?.TvgLogo ?? string.Empty;
 
             channels.Add(new PlaylistChannel
             {
-                Name = string.IsNullOrWhiteSpace(currentMetadata?.Name) ? BuildChannelName(streamUri) : currentMetadata.Name,
+                Name = channelName,
                 GroupTitle = currentMetadata?.GroupTitle ?? string.Empty,
                 TvgId = currentMetadata?.TvgId ?? string.Empty,
                 TvgLogo = logo,
@@ -225,6 +233,11 @@ public sealed class PlaylistService
             }
 
             var name = GetJsonValue(element, "name");
+            if (ShouldSkipChannel(name))
+            {
+                continue;
+            }
+
             var categoryId = GetJsonValue(element, "category_id");
             var tvgId = GetJsonValue(element, "epg_channel_id");
             var streamIcon = GetJsonValue(element, "stream_icon");
@@ -299,6 +312,12 @@ public sealed class PlaylistService
     {
         var lastSegment = streamUri.Segments.Length > 0 ? streamUri.Segments[^1].Trim('/') : string.Empty;
         return string.IsNullOrWhiteSpace(lastSegment) ? streamUri.Host : lastSegment;
+    }
+
+    private static bool ShouldSkipChannel(string? name)
+    {
+        return !string.IsNullOrWhiteSpace(name)
+               && name.Contains(HiddenChannelMarker, StringComparison.Ordinal);
     }
 
     private sealed class PlaylistMetadata

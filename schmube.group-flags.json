@@ -1,9 +1,15 @@
 {
   "aliases": {
     "CON": "CG",
+    "CG": "ME",
     "CABO": "CV",
     "ANG": "AO",
-    "AU": "AU"
+    "AU": "AU",
+    "MA": "MT",
+    "SU": "SR",
+    "TN": "TW",
+    "KU": "KU",
+    "AG": "AF"
   },
   "rules": [
     {

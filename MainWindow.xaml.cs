@@ -89,6 +89,7 @@ public partial class MainWindow : Window
         RegisterFocusHint(KeepOnTopCheckBox, "Keep the separate player window above your other apps while you watch.");
         RegisterFocusHint(ChannelSearchTextBox, "Filter the loaded channels by name, group, channel ID, or the live guide preview.");
         RegisterFocusHint(GroupFilterComboBox, "Limit the channel list to one normalized group after the playlist finishes loading.");
+        RegisterFocusHint(SearchAllGroupsCheckBox, "When search text is present, search across all groups instead of limiting results to the selected group.");
         RegisterFocusHint(FavoritesOnlyCheckBox, "Show only channels you have marked as favorites.");
         RegisterFocusHint(RecentOnlyCheckBox, "Show only channels you played recently.");
         RegisterFocusHint(LoadChannelsButton, "Load or refresh the channel list from the configured source.");
@@ -708,13 +709,14 @@ public partial class MainWindow : Window
         var preferredChannelKey = selectFirstChannel ? _pendingSelectionChannelKey : string.Empty;
         var searchText = ChannelSearchTextBox.Text.Trim();
         var selectedGroup = SelectedGroupOption?.Value;
+        var searchAllGroups = SearchAllGroupsCheckBox.IsChecked == true && !string.IsNullOrWhiteSpace(searchText);
         var favoritesOnly = FavoritesOnlyCheckBox.IsChecked == true;
         var recentOnly = RecentOnlyCheckBox.IsChecked == true;
 
         var filteredChannels = _allChannels
             .Where(channel => !HasTemporaryChannelList || _temporaryChannelOrder.ContainsKey(channel.StreamUri.ToString()))
             .Where(channel => MatchesSearch(channel, searchText))
-            .Where(channel => MatchesGroup(channel, selectedGroup))
+            .Where(channel => searchAllGroups || MatchesGroup(channel, selectedGroup))
             .Where(channel => !favoritesOnly || channel.IsFavorite)
             .Where(channel => !recentOnly || channel.RecentRank >= 0);
 
@@ -811,7 +813,15 @@ public partial class MainWindow : Window
         if (SelectedGroupOption is { Value: not "" } selectedGroupOption
             && !string.Equals(selectedGroupOption.Value, AllGroupsLabel, StringComparison.Ordinal))
         {
-            summary += $" Group: {selectedGroupOption.Label}.";
+            var searchAllGroups = SearchAllGroupsCheckBox.IsChecked == true && !string.IsNullOrWhiteSpace(ChannelSearchTextBox.Text.Trim());
+            summary += searchAllGroups
+                ? $" Group: {selectedGroupOption.Label} (ignored while searching)."
+                : $" Group: {selectedGroupOption.Label}.";
+        }
+
+        if (SearchAllGroupsCheckBox.IsChecked == true && !string.IsNullOrWhiteSpace(ChannelSearchTextBox.Text.Trim()))
+        {
+            summary += " Searching across all groups.";
         }
 
         if (HasTemporaryChannelList)
@@ -1083,6 +1093,12 @@ public partial class MainWindow : Window
     }
 
     private void FavoritesOnlyCheckBox_Click(object sender, RoutedEventArgs e)
+    {
+        _searchDebounceTimer.Stop();
+        ApplyChannelFilter(selectFirstChannel: false);
+    }
+
+    private void SearchAllGroupsCheckBox_Click(object sender, RoutedEventArgs e)
     {
         _searchDebounceTimer.Stop();
         ApplyChannelFilter(selectFirstChannel: false);

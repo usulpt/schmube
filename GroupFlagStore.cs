@@ -94,8 +94,12 @@ public sealed class GroupFlagStore
         ["CANADA"] = "CA",
         ["CO"] = "CO",
         ["COLOMBIA"] = "CO",
+        ["CM"] = "CM",
+        ["CAMEROON"] = "CM",
         ["CR"] = "CR",
         ["COSTARICA"] = "CR",
+        ["NI"] = "NI",
+        ["NICARAGUA"] = "NI",
         ["CZ"] = "CZ",
         ["CZECHIA"] = "CZ",
         ["CZECHREPUBLIC"] = "CZ",
@@ -126,13 +130,23 @@ public sealed class GroupFlagStore
         ["AU"] = "AU",
         ["AUSTRALIA"] = "AU",
         ["NZ"] = "NZ",
+        ["NZL"] = "NZ",
         ["NEWZEALAND"] = "NZ",
+        ["MA"] = "MT",
         ["JP"] = "JP",
+        ["JPN"] = "JP",
         ["JAPAN"] = "JP",
         ["CN"] = "CN",
+        ["CHN"] = "CN",
         ["CHINA"] = "CN",
         ["IN"] = "IN",
         ["INDIA"] = "IN",
+        ["ID"] = "ID",
+        ["IDN"] = "ID",
+        ["INDONESIA"] = "ID",
+        ["IS"] = "IS",
+        ["ISL"] = "IS",
+        ["ICELAND"] = "IS",
         ["KH"] = "KH",
         ["CAMBODIA"] = "KH",
         ["KR"] = "KR",
@@ -147,8 +161,18 @@ public sealed class GroupFlagStore
         ["NORTHMACEDONIA"] = "MK",
         ["MY"] = "MY",
         ["MALAYSIA"] = "MY",
+        ["ML"] = "ML",
+        ["MALI"] = "ML",
+        ["ME"] = "ME",
+        ["MNE"] = "ME",
+        ["MONTENEGRO"] = "ME",
+        ["MZ"] = "MZ",
+        ["MOZ"] = "MZ",
+        ["MOZAMBIQUE"] = "MZ",
         ["NP"] = "NP",
         ["NEPAL"] = "NP",
+        ["NG"] = "NG",
+        ["NIGERIA"] = "NG",
         ["PA"] = "PA",
         ["PANAMA"] = "PA",
         ["PE"] = "PE",
@@ -158,7 +182,15 @@ public sealed class GroupFlagStore
         ["PHILIPPINES"] = "PH",
         ["PK"] = "PK",
         ["PAKISTAN"] = "PK",
+        ["SUR"] = "SR",
+        ["SU"] = "SR",
+        ["SURINAME"] = "SR",
+        ["TW"] = "TW",
+        ["TWN"] = "TW",
+        ["TN"] = "TW",
+        ["TAIWAN"] = "TW",
         ["RU"] = "RU",
+        ["RUS"] = "RU",
         ["RUSSIA"] = "RU",
         ["RS"] = "RS",
         ["SERBIA"] = "RS",
@@ -167,18 +199,60 @@ public sealed class GroupFlagStore
         ["SINGAPORE"] = "SG",
         ["SI"] = "SI",
         ["SLOVENIA"] = "SI",
+        ["SN"] = "SN",
+        ["SEN"] = "SN",
+        ["SENEGAL"] = "SN",
+        ["SO"] = "SO",
+        ["SOM"] = "SO",
+        ["SOMALIA"] = "SO",
+        ["TG"] = "TG",
+        ["TOG"] = "TG",
+        ["TOGO"] = "TG",
         ["MALTA"] = "MT",
         ["MT"] = "MT",
+        ["TZ"] = "TZ",
+        ["TANZANIA"] = "TZ",
+        ["CYPRIOT"] = "CY",
         ["CYPRUS"] = "CY",
         ["CY"] = "CY",
+        ["AZ"] = "AZ",
+        ["AZE"] = "AZ",
+        ["AZERBAIJAN"] = "AZ",
+        ["AM"] = "AM",
+        ["ARM"] = "AM",
+        ["ARMENIA"] = "AM",
+        ["AF"] = "AF",
+        ["AFG"] = "AF",
+        ["AG"] = "AF",
+        ["AFGHANISTAN"] = "AF",
+        ["ET"] = "ET",
+        ["ETH"] = "ET",
+        ["ETHIOPIA"] = "ET",
+        ["ETHO"] = "ET",
+        ["GH"] = "GH",
+        ["GHA"] = "GH",
+        ["GHANA"] = "GH",
+        ["KE"] = "KE",
+        ["KEN"] = "KE",
+        ["KN"] = "KE",
+        ["KENYA"] = "KE",
+        ["KU"] = "KU",
+        ["KURDISTAN"] = "KU",
         ["TH"] = "TH",
         ["THAILAND"] = "TH",
         ["UA"] = "UA",
         ["UKRAINE"] = "UA",
+        ["UG"] = "UG",
+        ["UGA"] = "UG",
+        ["UGANDA"] = "UG",
         ["UY"] = "UY",
         ["URUGUAY"] = "UY",
         ["UZ"] = "UZ",
         ["UZBEKISTAN"] = "UZ",
+        ["PRTORICO"] = "PR",
+        ["PUERTORICO"] = "PR",
+        ["PUERTORICAN"] = "PR",
+        ["VENEZULA"] = "VE",
         ["VE"] = "VE",
         ["VENEZUELA"] = "VE",
         ["VN"] = "VN",
@@ -197,13 +271,28 @@ public sealed class GroupFlagStore
 
     public GroupFlagInfo Resolve(string title, string? fallbackGroupTitle = null)
     {
+        if (TryResolveKnownChannelAndGroupException(title, fallbackGroupTitle, out var knownChannelAndGroupResult))
+        {
+            return knownChannelAndGroupResult;
+        }
+
         var primaryResult = ResolveSingle(title);
-        if (!string.IsNullOrWhiteSpace(primaryResult.Flag) || string.IsNullOrWhiteSpace(fallbackGroupTitle))
+        if (string.IsNullOrWhiteSpace(fallbackGroupTitle))
         {
             return primaryResult;
         }
 
+        if (TryResolveLeadingCountry(fallbackGroupTitle, out var explicitFallbackResult))
+        {
+            return explicitFallbackResult;
+        }
+
         var fallbackResult = ResolveSingle(fallbackGroupTitle);
+        if (!string.IsNullOrWhiteSpace(primaryResult.Flag))
+        {
+            return primaryResult;
+        }
+
         if (!string.IsNullOrWhiteSpace(fallbackResult.Flag))
         {
             return fallbackResult;
@@ -223,6 +312,11 @@ public sealed class GroupFlagStore
         if (IsIgnoredStatusTitle(trimmedTitle))
         {
             return new GroupFlagInfo(string.Empty, trimmedTitle);
+        }
+
+        if (TryResolveKnownGroupException(trimmedTitle, out var knownExceptionResult))
+        {
+            return knownExceptionResult;
         }
 
         if (TryResolveArabicRegionalCountry(trimmedTitle, out var arabicRegionalResult))
@@ -497,6 +591,278 @@ public sealed class GroupFlagStore
             || trimmedTitle.StartsWith("AR -", StringComparison.CurrentCultureIgnoreCase)
             || trimmedTitle.StartsWith("AR –", StringComparison.CurrentCultureIgnoreCase)
             || trimmedTitle.StartsWith("AR —", StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private static bool IsAfricaRegionalGroup(string title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return false;
+        }
+
+        var trimmedTitle = title.Trim();
+        return trimmedTitle.StartsWith("AFR|", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("AFR:", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("AFR/", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("AFR -", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("AFR –", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("AFR —", StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private bool TryResolveLeadingCountry(string title, out GroupFlagInfo result)
+    {
+        result = new GroupFlagInfo(string.Empty, title);
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return false;
+        }
+
+        if (TryResolveArabicRegionalCountry(title, out result) && !string.IsNullOrWhiteSpace(result.Flag))
+        {
+            return true;
+        }
+
+        var countrySegment = ExtractCountrySegment(title);
+        if (string.IsNullOrWhiteSpace(countrySegment))
+        {
+            return false;
+        }
+
+        if (TryResolveAlias(countrySegment, out var directCountryCode))
+        {
+            result = new GroupFlagInfo(BuildFlagAssetPath(directCountryCode), BuildDefaultLabel(countrySegment));
+            return !string.IsNullOrWhiteSpace(result.Flag);
+        }
+
+        if (TryInferCountryCode(countrySegment, out var inferredCountryCode))
+        {
+            result = new GroupFlagInfo(BuildFlagAssetPath(inferredCountryCode), BuildDefaultLabel(countrySegment));
+            return !string.IsNullOrWhiteSpace(result.Flag);
+        }
+
+        return false;
+    }
+
+    private bool TryResolveKnownChannelAndGroupException(string? title, string? fallbackGroupTitle, out GroupFlagInfo result)
+    {
+        result = new GroupFlagInfo(string.Empty, fallbackGroupTitle ?? title ?? string.Empty);
+
+        var trimmedTitle = title?.Trim() ?? string.Empty;
+        var trimmedGroup = fallbackGroupTitle?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(trimmedGroup))
+        {
+            return false;
+        }
+
+        if (IsAfricaRegionalGroup(trimmedGroup)
+            && TryResolveAfricaChannelPrefix(trimmedTitle, out result))
+        {
+            return true;
+        }
+
+        var indicatesMalaysiaGroup = trimmedGroup.Contains("MALAYSIA", StringComparison.CurrentCultureIgnoreCase);
+        var indicatesMalaysiaChannel = trimmedTitle.StartsWith("MY|", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("MY:", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("MY/", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("MY -", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("MY –", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("MY —", StringComparison.CurrentCultureIgnoreCase);
+
+        if (indicatesMalaysiaGroup && indicatesMalaysiaChannel)
+        {
+            result = new GroupFlagInfo(BuildFlagAssetPath("MY"), "Malaysia");
+            return !string.IsNullOrWhiteSpace(result.Flag);
+        }
+
+        if (trimmedTitle.StartsWith("SOM:", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("SOM|", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("SOM/", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("SOM -", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("SOM –", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("SOM —", StringComparison.CurrentCultureIgnoreCase))
+        {
+            result = new GroupFlagInfo(BuildFlagAssetPath("SO"), "Somalia");
+            return !string.IsNullOrWhiteSpace(result.Flag);
+        }
+
+        if (trimmedTitle.StartsWith("ETH:", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("ETH|", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("ETH/", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("ETH -", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("ETH –", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("ETH —", StringComparison.CurrentCultureIgnoreCase))
+        {
+            result = new GroupFlagInfo(BuildFlagAssetPath("ET"), "Ethiopia");
+            return !string.IsNullOrWhiteSpace(result.Flag);
+        }
+
+        return false;
+    }
+
+    private bool TryResolveAfricaChannelPrefix(string title, out GroupFlagInfo result)
+    {
+        result = new GroupFlagInfo(string.Empty, title);
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return false;
+        }
+
+        string? countryCode = null;
+        string? label = null;
+
+        if (StartsWithAny(title, "CAM"))
+        {
+            countryCode = "CM";
+            label = "Cameroon";
+        }
+        else if (StartsWithAny(title, "NIG"))
+        {
+            countryCode = "NG";
+            label = "Nigeria";
+        }
+        else if (StartsWithAny(title, "ETHO"))
+        {
+            countryCode = "ET";
+            label = "Ethiopia";
+        }
+        else if (StartsWithAny(title, "GHA"))
+        {
+            countryCode = "GH";
+            label = "Ghana";
+        }
+        else if (StartsWithAny(title, "KN"))
+        {
+            countryCode = "KE";
+            label = "Kenya";
+        }
+        else if (StartsWithAny(title, "MALI"))
+        {
+            countryCode = "ML";
+            label = "Mali";
+        }
+        else if (StartsWithAny(title, "MOZ"))
+        {
+            countryCode = "MZ";
+            label = "Mozambique";
+        }
+        else if (StartsWithAny(title, "SEN"))
+        {
+            countryCode = "SN";
+            label = "Senegal";
+        }
+        else if (StartsWithAny(title, "TOG"))
+        {
+            countryCode = "TG";
+            label = "Togo";
+        }
+        else if (StartsWithAny(title, "TZ"))
+        {
+            countryCode = "TZ";
+            label = "Tanzania";
+        }
+        else if (StartsWithAny(title, "UGA"))
+        {
+            countryCode = "UG";
+            label = "Uganda";
+        }
+
+        if (string.IsNullOrWhiteSpace(countryCode) || string.IsNullOrWhiteSpace(label))
+        {
+            return false;
+        }
+
+        result = new GroupFlagInfo(BuildFlagAssetPath(countryCode), label);
+        return !string.IsNullOrWhiteSpace(result.Flag);
+    }
+
+    private static bool StartsWithAny(string value, string prefix)
+    {
+        return value.StartsWith($"{prefix}:", StringComparison.CurrentCultureIgnoreCase)
+            || value.StartsWith($"{prefix}|", StringComparison.CurrentCultureIgnoreCase)
+            || value.StartsWith($"{prefix}/", StringComparison.CurrentCultureIgnoreCase)
+            || value.StartsWith($"{prefix} -", StringComparison.CurrentCultureIgnoreCase)
+            || value.StartsWith($"{prefix} –", StringComparison.CurrentCultureIgnoreCase)
+            || value.StartsWith($"{prefix} —", StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private bool TryResolveKnownGroupException(string title, out GroupFlagInfo result)
+    {
+        result = new GroupFlagInfo(string.Empty, title);
+        var trimmedTitle = title?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmedTitle))
+        {
+            return false;
+        }
+
+        if (trimmedTitle.StartsWith("ASIA|", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("ASIA:", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("ASIA/", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("ASIA -", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("ASIA –", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("ASIA —", StringComparison.CurrentCultureIgnoreCase))
+        {
+            result = new GroupFlagInfo(BuildFlagAssetPath("IN"), "India");
+            return !string.IsNullOrWhiteSpace(result.Flag);
+        }
+
+        if (TryResolveRegionalCountryFromSegments(trimmedTitle, "LA", out result))
+        {
+            return true;
+        }
+
+        if (TryResolveRegionalCountryFromSegments(trimmedTitle, "AFR", out result))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryResolveRegionalCountryFromSegments(string title, string regionMarker, out GroupFlagInfo result)
+    {
+        result = new GroupFlagInfo(string.Empty, title);
+        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(regionMarker))
+        {
+            return false;
+        }
+
+        if (!title.StartsWith($"{regionMarker}|", StringComparison.CurrentCultureIgnoreCase)
+            && !title.StartsWith($"{regionMarker}:", StringComparison.CurrentCultureIgnoreCase)
+            && !title.StartsWith($"{regionMarker}/", StringComparison.CurrentCultureIgnoreCase)
+            && !title.StartsWith($"{regionMarker} -", StringComparison.CurrentCultureIgnoreCase)
+            && !title.StartsWith($"{regionMarker} –", StringComparison.CurrentCultureIgnoreCase)
+            && !title.StartsWith($"{regionMarker} —", StringComparison.CurrentCultureIgnoreCase))
+        {
+            return false;
+        }
+
+        var segments = title
+            .Split(GroupSeparators, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Skip(1);
+
+        foreach (var segment in segments)
+        {
+            if (TryResolveAlias(segment, out var directCountryCode))
+            {
+                result = new GroupFlagInfo(BuildFlagAssetPath(directCountryCode), BuildDefaultLabel(segment));
+                if (!string.IsNullOrWhiteSpace(result.Flag))
+                {
+                    return true;
+                }
+            }
+
+            if (TryInferCountryCode(segment, out var inferredCountryCode))
+            {
+                result = new GroupFlagInfo(BuildFlagAssetPath(inferredCountryCode), BuildDefaultLabel(segment));
+                if (!string.IsNullOrWhiteSpace(result.Flag))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static string ExtractCountrySegment(string title)

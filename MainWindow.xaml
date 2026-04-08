@@ -19,6 +19,15 @@
             <Setter Property="TextWrapping" Value="Wrap" />
             <Setter Property="IsReadOnlyCaretVisible" Value="True" />
         </Style>
+        <Style x:Key="SelectedChannelFieldLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,2" />
+        </Style>
+        <Style x:Key="SelectedChannelFieldValueStyle"
+               TargetType="TextBox"
+               BasedOn="{StaticResource SelectableInfoTextBoxStyle}">
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
         <Style x:Key="MainGroupComboBoxToggleButtonStyle" TargetType="ToggleButton">
             <Setter Property="Template">
                 <Setter.Value>
@@ -203,6 +212,13 @@
                     </ComboBox>
                 </StackPanel>
 
+                <CheckBox x:Name="SearchAllGroupsCheckBox"
+                          Margin="0,26,12,0"
+                          VerticalAlignment="Top"
+                          Content="Search all groups"
+                          ToolTip="When search text is present, ignore the selected group and search across all loaded channels."
+                          Click="SearchAllGroupsCheckBox_Click" />
+
                 <CheckBox x:Name="FavoritesOnlyCheckBox"
                           Margin="0,26,12,0"
                           VerticalAlignment="Top"
@@ -288,26 +304,25 @@
 
                         <TextBox x:Name="ChannelSummaryTextBox"
                                  Style="{StaticResource SelectableInfoTextBoxStyle}"
-                                 Margin="0,0,0,12"
+                                 Margin="0,0,0,14"
                                  Foreground="{DynamicResource SecondaryTextBrush}" />
 
-                        <TextBlock FontWeight="SemiBold" Text="Group" />
+                        <TextBlock Style="{StaticResource SelectedChannelFieldLabelStyle}" Text="Group" />
                         <TextBox x:Name="SelectedChannelGroupTextBox"
-                                 Style="{StaticResource SelectableInfoTextBoxStyle}" />
+                                 Style="{StaticResource SelectedChannelFieldValueStyle}" />
 
-                        <TextBlock FontWeight="SemiBold" Text="Channel ID" />
+                        <TextBlock Style="{StaticResource SelectedChannelFieldLabelStyle}" Text="Channel ID" />
                         <TextBox x:Name="SelectedChannelIdTextBox"
-                                 Style="{StaticResource SelectableInfoTextBoxStyle}" />
+                                 Style="{StaticResource SelectedChannelFieldValueStyle}" />
 
-                        <TextBlock FontWeight="SemiBold" Text="Stream URL" />
+                        <TextBlock Style="{StaticResource SelectedChannelFieldLabelStyle}" Text="Stream URL" />
                         <TextBox x:Name="SelectedChannelUrlTextBox"
-                                 Style="{StaticResource SelectableInfoTextBoxStyle}"
-                                 Margin="0,4,0,0" />
+                                 Style="{StaticResource SelectedChannelFieldValueStyle}" />
 
-                        <TextBlock FontWeight="SemiBold" Text="Program Guide" />
+                        <TextBlock Style="{StaticResource SelectedChannelFieldLabelStyle}" Text="Program Guide" />
                         <TextBox x:Name="ProgramGuideStatusTextBox"
-                                 Style="{StaticResource SelectableInfoTextBoxStyle}"
-                                 Margin="0,4,0,8"
+                                 Style="{StaticResource SelectedChannelFieldValueStyle}"
+                                 Margin="0,0,0,8"
                                  Foreground="{DynamicResource SecondaryTextBrush}" />
 
                         <ListBox x:Name="ProgramGuideListBox"
@@ -468,6 +483,4 @@
         </Border>
     </Grid>
 </Window>
-
-
 
