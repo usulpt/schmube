@@ -8,14 +8,14 @@
         MinWidth="480"
         MinHeight="320"
         WindowStartupLocation="CenterScreen">
-    <Grid Background="#0F172A">
+    <Grid Background="{DynamicResource PlayerBackgroundBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <DockPanel x:Name="PlayerToolbar" Grid.Row="0" Background="#111827" LastChildFill="True" Height="46">
+        <DockPanel x:Name="PlayerToolbar" Grid.Row="0" Background="{DynamicResource PlayerChromeBrush}" LastChildFill="True" Height="46">
             <StackPanel DockPanel.Dock="Left"
                         Orientation="Horizontal"
                         Margin="10,6,0,6">
@@ -80,17 +80,17 @@
             <StackPanel Margin="12,0,12,0"
                         VerticalAlignment="Center">
                 <TextBlock x:Name="NowPlayingText"
-                           Foreground="#F9FAFB"
+                           Foreground="{DynamicResource InverseTextBrush}"
                            Text="No stream loaded" />
                 <StackPanel Orientation="Horizontal">
                     <TextBlock x:Name="RecordingText"
                                Margin="0,0,12,0"
-                               Foreground="#FCA5A5"
+                               Foreground="{DynamicResource DangerTextBrush}"
                                FontWeight="SemiBold"
                                Visibility="Collapsed"
                                Text="REC" />
                     <TextBlock x:Name="VolumeText"
-                               Foreground="#93C5FD"
+                               Foreground="{DynamicResource AccentTextBrush}"
                                FontWeight="SemiBold"
                                Text="Volume 100%" />
                 </StackPanel>
@@ -101,9 +101,9 @@
                        Grid.Row="1"
                        MouseLeftButtonDown="VideoSurface_MouseLeftButtonDown" />
 
-        <Border x:Name="PlayerStatusBar" Grid.Row="2" Background="#111827" Padding="12,8">
+        <Border x:Name="PlayerStatusBar" Grid.Row="2" Background="{DynamicResource PlayerChromeBrush}" Padding="12,8">
             <TextBlock x:Name="StatusText"
-                       Foreground="#D1D5DB"
+                       Foreground="{DynamicResource InverseMutedTextBrush}"
                        Text="Ready." />
         </Border>
     </Grid>

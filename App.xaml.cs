@@ -19,6 +19,9 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
+        var settings = new SettingsStore().Load();
+        ThemeService.ApplyTheme(settings.UseDarkMode);
+
         var window = new MainWindow();
         MainWindow = window;
         window.Show();

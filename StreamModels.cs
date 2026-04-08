@@ -11,6 +11,8 @@ public sealed class StreamSettings
 
     public bool KeepPlayerOnTop { get; set; }
 
+    public bool UseDarkMode { get; set; }
+
     public List<string> FavoriteChannelKeys { get; set; } = [];
 
     public List<string> RecentChannelKeys { get; set; } = [];

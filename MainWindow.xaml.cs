@@ -92,8 +92,8 @@ public partial class MainWindow : Window
         RegisterFocusHint(FavoritesOnlyCheckBox, "Show only channels you have marked as favorites.");
         RegisterFocusHint(RecentOnlyCheckBox, "Show only channels you played recently.");
         RegisterFocusHint(LoadChannelsButton, "Load or refresh the channel list from the configured source.");
-        RegisterFocusHint(TvListingsButton, "Open a listings page, import broadcaster rows, and build a temporary channel list from the current playlist.");
-        RegisterFocusHint(ClearTempListButton, "Clear the active temporary channel list and return to normal browsing.");
+        RegisterFocusHint(TvListingsButton, "Open a football match page, generate compatible playlist channels from its broadcaster listing, and build a temporary channel list from the current playlist.");
+        RegisterFocusHint(ClearTempListButton, "Clear the active temporary channel list created from TV listings results and return to normal browsing.");
         RegisterFocusHint(PlaySelectedButton, "Start playback for the channel currently selected in the list.");
         RegisterFocusHint(PlayUrlButton, "Play the raw URL directly when it points to a single stream rather than a playlist account.");
         RegisterFocusHint(OpenPlayerButton, "Open the separate resizable player window without changing the current stream.");
@@ -140,6 +140,8 @@ public partial class MainWindow : Window
             ? _appConfig.SubscriptionUrl
             : settings.StreamUrl;
         KeepOnTopCheckBox.IsChecked = settings.KeepPlayerOnTop;
+        DarkModeCheckBox.IsChecked = settings.UseDarkMode;
+        ThemeService.ApplyTheme(settings.UseDarkMode);
         FavoritesOnlyCheckBox.IsChecked = false;
         RecentOnlyCheckBox.IsChecked = false;
         UpdateTemporaryListUi();
@@ -162,6 +164,7 @@ public partial class MainWindow : Window
         {
             StreamUrl = StreamUrlTextBox.Text.Trim(),
             KeepPlayerOnTop = KeepOnTopCheckBox.IsChecked == true,
+            UseDarkMode = DarkModeCheckBox.IsChecked == true,
             FavoriteChannelKeys = _favoriteChannelKeys.OrderBy(key => key, StringComparer.OrdinalIgnoreCase).ToList(),
             RecentChannelKeys = _recentChannelKeys.ToList(),
             LastChannelKey = _lastPlayedChannelKey
@@ -1044,6 +1047,14 @@ public partial class MainWindow : Window
     {
         _settingsStore.Save(CollectSettingsFromUi());
         StatusTextBlock.Text = "Settings saved.";
+    }
+
+    private void DarkModeCheckBox_Click(object sender, RoutedEventArgs e)
+    {
+        var useDarkMode = DarkModeCheckBox.IsChecked == true;
+        ThemeService.ApplyTheme(useDarkMode);
+        _settingsStore.Save(CollectSettingsFromUi());
+        StatusTextBlock.Text = useDarkMode ? "Dark mode enabled." : "Dark mode disabled.";
     }
 
     private async void ChannelsListView_MouseDoubleClick(object sender, MouseButtonEventArgs e)

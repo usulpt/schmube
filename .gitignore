@@ -1,3 +1,4 @@
 schmube.config.json
+schmube.channel-matching.json
 bin/**/*
 obj/**/*

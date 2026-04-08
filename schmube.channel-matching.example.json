@@ -1,0 +1,33 @@
+{
+  "aliases": [
+    {
+      "offerPattern": "TNT Sports 1",
+      "countryCode": "GB",
+      "channelNameContains": [
+        "TNT Sports 1",
+        "BT Sport 1"
+      ],
+      "channelIds": [],
+      "channelGroupContains": [],
+      "excludeChannelNameContains": [],
+      "scoreBoost": 500
+    },
+    {
+      "offerPattern": "Paramount+",
+      "countryCode": "US",
+      "channelNameContains": [
+        "Paramount+"
+      ],
+      "channelIds": [],
+      "channelGroupContains": [
+        "USA",
+        "United States"
+      ],
+      "excludeChannelNameContains": [],
+      "scoreBoost": 500
+    }
+  ],
+  "ignoredOfferNames": [
+    "OneFootball"
+  ]
+}

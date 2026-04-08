@@ -3,10 +3,10 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="TV Listings"
-        Height="780"
-        Width="1320"
-        MinHeight="680"
-        MinWidth="1080"
+        Height="800"
+        Width="1380"
+        MinHeight="700"
+        MinWidth="1120"
         WindowStartupLocation="Manual">
     <Grid Margin="14">
         <Grid.RowDefinitions>
@@ -18,7 +18,8 @@
 
         <StackPanel Grid.Row="0" Margin="0,0,0,12">
             <TextBlock FontSize="24" FontWeight="SemiBold" Text="TV Listings" />
-            <TextBlock Foreground="#4B5563" Text="Open a listings page, import the visible broadcaster rows, then turn matched playlist channels into a temporary navigation list." />
+            <TextBlock Foreground="{DynamicResource SecondaryTextBrush}"
+                       Text="Open a football match page, generate compatible playlist channels from its broadcaster listing, then use the result as a temporary navigation list." />
         </StackPanel>
 
         <DockPanel Grid.Row="1" Margin="0,0,0,12" LastChildFill="True">
@@ -35,12 +36,12 @@
                         Margin="0,0,8,0"
                         Content="Open External"
                         Click="OpenExternalButton_Click" />
-                <Button x:Name="ImportButton"
-                        Width="116"
+                <Button x:Name="GenerateButton"
+                        Width="144"
                         Height="32"
                         Margin="0,0,8,0"
-                        Content="Import Page"
-                        Click="ImportButton_Click" />
+                        Content="Generate Channels"
+                        Click="GenerateButton_Click" />
                 <Button x:Name="UseTempListButton"
                         Width="132"
                         Height="32"
@@ -54,7 +55,7 @@
             </WrapPanel>
 
             <StackPanel Margin="0,0,12,0">
-                <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Listings URL" />
+                <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Match Listings URL" />
                 <TextBox x:Name="ListingUrlTextBox"
                          Height="32"
                          Padding="10,6"
@@ -64,14 +65,14 @@
 
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="2.1*" />
+                <ColumnDefinition Width="2.05*" />
                 <ColumnDefinition Width="10" />
-                <ColumnDefinition Width="1.35*" />
+                <ColumnDefinition Width="1.45*" />
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0"
-                    Background="#FFFFFF"
-                    BorderBrush="#E5E7EB"
+                    Background="{DynamicResource SurfaceBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="1"
                     CornerRadius="8"
                     Padding="6">
@@ -82,12 +83,12 @@
                           Width="10"
                           HorizontalAlignment="Stretch"
                           VerticalAlignment="Stretch"
-                          Background="#E5E7EB"
+                          Background="{DynamicResource DividerBrush}"
                           ShowsPreview="True" />
 
             <Border Grid.Column="2"
-                    Background="#F9FAFB"
-                    BorderBrush="#E5E7EB"
+                    Background="{DynamicResource SurfaceAltBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="1"
                     CornerRadius="8"
                     Padding="12">
@@ -96,62 +97,95 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <StackPanel Grid.Row="0" Margin="0,0,0,10">
-                        <TextBlock FontSize="18" FontWeight="SemiBold" Text="Imported Listings" />
-                        <TextBlock x:Name="ImportedSummaryTextBlock"
+                        <TextBlock FontSize="18" FontWeight="SemiBold" Text="Compatible Channel Generator" />
+                        <TextBlock x:Name="ResultsSummaryTextBlock"
                                    Margin="0,4,0,0"
-                                   Foreground="#4B5563"
-                                   Text="Import a page to inspect broadcaster rows and playlist matches." />
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   Text="Generate a compatible channel list from a rendered match page." />
+                        <TextBlock x:Name="SourceSummaryTextBlock"
+                                   Margin="0,4,0,0"
+                                   Foreground="{DynamicResource TertiaryTextBrush}"
+                                   Text="Playlist channels available: 0." />
                     </StackPanel>
 
                     <StackPanel Grid.Row="1" Margin="0,0,0,10">
-                        <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Search Imported Rows" />
-                        <TextBox x:Name="ImportedSearchTextBox"
+                        <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Search Results" />
+                        <TextBox x:Name="ResultSearchTextBox"
                                  Height="32"
                                  Padding="10,6"
-                                 TextChanged="ImportedSearchTextBox_TextChanged" />
+                                 TextChanged="ResultSearchTextBox_TextChanged" />
                     </StackPanel>
 
-                    <ListView x:Name="ImportedMatchesListView"
-                              Grid.Row="2"
-                              SelectionMode="Extended"
-                              SelectionChanged="ImportedMatchesListView_SelectionChanged">
-                        <ListView.View>
-                            <GridView AllowsColumnReorder="False">
-                                <GridViewColumn Header="Country" Width="120" DisplayMemberBinding="{Binding Country}" />
-                                <GridViewColumn Header="Broadcasters" Width="190" DisplayMemberBinding="{Binding BroadcasterText}" />
-                                <GridViewColumn Header="Matches" Width="62" DisplayMemberBinding="{Binding MatchCount}" />
-                                <GridViewColumn Header="Matched Channels" Width="260" DisplayMemberBinding="{Binding MatchPreview}" />
-                            </GridView>
-                        </ListView.View>
-                    </ListView>
+                    <TabControl Grid.Row="2">
+                        <TabItem Header="Channels">
+                            <ListView x:Name="GeneratedChannelsListView"
+                                      SelectionMode="Extended"
+                                      SelectionChanged="GeneratedChannelsListView_SelectionChanged">
+                                <ListView.View>
+                                    <GridView AllowsColumnReorder="False">
+                                        <GridViewColumn Header="Channel" Width="170" DisplayMemberBinding="{Binding ChannelName}" />
+                                        <GridViewColumn Header="Group" Width="116" DisplayMemberBinding="{Binding ChannelGroup}" />
+                                        <GridViewColumn Header="Source Offers" Width="240" DisplayMemberBinding="{Binding OfferPreview}" />
+                                        <GridViewColumn Header="Score" Width="54" DisplayMemberBinding="{Binding BestScore}" />
+                                        <GridViewColumn Header="Reason" Width="220" DisplayMemberBinding="{Binding MatchReason}" />
+                                    </GridView>
+                                </ListView.View>
+                            </ListView>
+                        </TabItem>
 
-                    <StackPanel Grid.Row="3" Margin="0,10,0,0">
-                        <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Import Diagnostics" />
-                        <TextBox x:Name="DiagnosticsTextBox"
-                                 Height="124"
-                                 IsReadOnly="True"
-                                 TextWrapping="Wrap"
-                                 VerticalScrollBarVisibility="Auto"
-                                 HorizontalScrollBarVisibility="Auto"
-                                 FontFamily="Consolas"
-                                 FontSize="12" />
-                    </StackPanel>
+                        <TabItem Header="Broadcasters">
+                            <ListView x:Name="OfferMatchesListView"
+                                      SelectionMode="Extended">
+                                <ListView.View>
+                                    <GridView AllowsColumnReorder="False">
+                                        <GridViewColumn Header="Country" Width="118" DisplayMemberBinding="{Binding Country}" />
+                                        <GridViewColumn Header="Broadcaster" Width="170" DisplayMemberBinding="{Binding Broadcaster}" />
+                                        <GridViewColumn Header="Matches" Width="56" DisplayMemberBinding="{Binding MatchCount}" />
+                                        <GridViewColumn Header="Top Match" Width="170" DisplayMemberBinding="{Binding TopMatch}" />
+                                        <GridViewColumn Header="Reason" Width="220" DisplayMemberBinding="{Binding MatchReason}" />
+                                    </GridView>
+                                </ListView.View>
+                            </ListView>
+                        </TabItem>
+
+                        <TabItem Header="Unmatched">
+                            <ListView x:Name="UnmatchedOffersListView"
+                                      SelectionMode="Extended">
+                                <ListView.View>
+                                    <GridView AllowsColumnReorder="False">
+                                        <GridViewColumn Header="Country" Width="118" DisplayMemberBinding="{Binding Country}" />
+                                        <GridViewColumn Header="Broadcaster" Width="200" DisplayMemberBinding="{Binding Broadcaster}" />
+                                        <GridViewColumn Header="Reason" Width="290" DisplayMemberBinding="{Binding MatchReason}" />
+                                    </GridView>
+                                </ListView.View>
+                            </ListView>
+                        </TabItem>
+
+                        <TabItem Header="Diagnostics">
+                            <TextBox x:Name="DiagnosticsTextBox"
+                                     IsReadOnly="True"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     HorizontalScrollBarVisibility="Auto"
+                                     FontFamily="Consolas"
+                                     FontSize="12" />
+                        </TabItem>
+                    </TabControl>
                 </Grid>
             </Border>
         </Grid>
 
         <Border Grid.Row="3"
                 Margin="0,12,0,0"
-                Background="#111827"
+                Background="{DynamicResource StatusSurfaceBrush}"
                 CornerRadius="8"
                 Padding="12,10">
             <TextBlock x:Name="StatusTextBlock"
-                       Foreground="#F9FAFB"
-                       Text="Open a listings page, wait for it to finish loading, then click Import Page." />
+                       Foreground="{DynamicResource InverseTextBrush}"
+                       Text="Open a listings page, wait for it to finish loading, then click Generate Channels." />
         </Border>
     </Grid>
 </Window>

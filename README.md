@@ -50,11 +50,19 @@ Example:
 
 `aliases` maps any custom provider token to the real two-letter flag asset code used by the app. So if your provider uses `CHL: Canal 13`, adding `"CHL": "CL"` makes Schmube use the Chile flag. If you map to a country that is not already bundled, add the matching lowercase PNG to `Assets/Flags`, for example `Assets/Flags/cl.png`.
 
-## TV listings import
+## TV listings
 
-Use `TV Listings` after loading a playlist. It opens a browser window inside Schmube so you can load a listings page such as a Live Soccer TV match page, import visible broadcaster rows, search them, and turn the matched playlist channels into a temporary list.
+Use `TV Listings` after loading a playlist. It opens a browser window inside Schmube so you can load a football match page such as a Live Soccer TV match page, generate a list of broadcaster offers from the rendered page, match those offers against your current playlist, and turn the compatible results into a temporary list.
 
-The temporary list only affects the current browsing session. Once applied, the main channel grid, `Play Selected`, and the player window next/previous controls all operate on that imported subset until you click `Clear Temp`.
+The TV listings window now separates three things:
+
+1. broadcaster extraction from the current page
+2. compatible playlist channel matching
+3. temporary list creation from the generated compatible channels
+
+The temporary list only affects the current browsing session. Once applied, the main channel grid, `Play Selected`, and the player window next/previous controls all operate on that generated subset until you click `Clear Temp`.
+
+Optional channel alias overrides can be stored in `schmube.channel-matching.json`. Use `schmube.channel-matching.example.json` as a starting point when a website broadcaster name does not closely match the name used in your playlist.
 
 ## Usage
 
