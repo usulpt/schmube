@@ -7,6 +7,7 @@
         Height="640"
         MinWidth="480"
         MinHeight="320"
+        Icon="Assets/AppIcon.ico"
         WindowStartupLocation="CenterScreen">
     <Grid Background="{DynamicResource PlayerBackgroundBrush}">
         <Grid.RowDefinitions>
@@ -85,9 +86,19 @@
 
             <StackPanel Margin="12,0,12,0"
                         VerticalAlignment="Center">
-                <TextBlock x:Name="NowPlayingText"
-                           Foreground="{DynamicResource InverseTextBrush}"
-                           Text="No stream loaded" />
+                <StackPanel Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <Image x:Name="NowPlayingLogoImage"
+                           Width="28"
+                           Height="24"
+                           Margin="0,0,8,0"
+                           Stretch="Uniform"
+                           Visibility="Collapsed" />
+                    <TextBlock x:Name="NowPlayingText"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource InverseTextBrush}"
+                               Text="No stream loaded" />
+                </StackPanel>
                 <StackPanel Orientation="Horizontal">
                     <TextBlock x:Name="RecordingText"
                                Margin="0,0,12,0"

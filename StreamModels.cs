@@ -35,13 +35,14 @@ public sealed class GroupFilterOption
 
 public sealed class PlaybackRequest
 {
-    public PlaybackRequest(Uri streamUri, bool keepPlayerOnTop, string displayName, bool allowReconnect, string recordingsDirectory)
+    public PlaybackRequest(Uri streamUri, bool keepPlayerOnTop, string displayName, bool allowReconnect, string recordingsDirectory, string logoSource = "")
     {
         StreamUri = streamUri;
         KeepPlayerOnTop = keepPlayerOnTop;
         DisplayName = displayName;
         AllowReconnect = allowReconnect;
         RecordingsDirectory = recordingsDirectory;
+        LogoSource = logoSource;
     }
 
     public Uri StreamUri { get; }
@@ -53,6 +54,8 @@ public sealed class PlaybackRequest
     public bool AllowReconnect { get; }
 
     public string RecordingsDirectory { get; }
+
+    public string LogoSource { get; }
 }
 
 public sealed class PlaylistChannel : INotifyPropertyChanged

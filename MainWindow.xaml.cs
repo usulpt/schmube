@@ -191,10 +191,10 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private PlaybackRequest BuildPlaybackRequest(Uri streamUri, string displayName, bool allowReconnect)
+    private PlaybackRequest BuildPlaybackRequest(Uri streamUri, string displayName, bool allowReconnect, string logoSource = "")
     {
         var settings = CollectSettingsFromUi();
-        return new PlaybackRequest(streamUri, settings.KeepPlayerOnTop, displayName, allowReconnect, ResolveRecordingsDirectory());
+        return new PlaybackRequest(streamUri, settings.KeepPlayerOnTop, displayName, allowReconnect, ResolveRecordingsDirectory(), logoSource);
     }
 
     private bool TryBuildDirectRequest(out PlaybackRequest? request)
@@ -317,7 +317,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var request = BuildPlaybackRequest(selectedChannel.StreamUri, selectedChannel.Name, allowReconnect: true);
+        var request = BuildPlaybackRequest(selectedChannel.StreamUri, selectedChannel.Name, allowReconnect: true, selectedChannel.LogoSource);
         if (await PlayRequestAsync(request, $"Playing {selectedChannel.Name}."))
         {
             RememberPlayedChannel(selectedChannel);

@@ -9,8 +9,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using LibVLCSharp.Shared;
+using ImageSource = System.Windows.Media.ImageSource;
 
 namespace Schmube;
 
@@ -140,6 +142,7 @@ public partial class PlayerWindow : Window
 
             SetAlwaysOnTop(request.KeepPlayerOnTop);
             NowPlayingText.Text = request.DisplayName;
+            UpdateNowPlayingLogo(request.LogoSource);
             Title = $"Schmube Player - {request.DisplayName}";
 
             StartPlaybackCore(request, isReconnect: false);
@@ -154,6 +157,7 @@ public partial class PlayerWindow : Window
         CancelReconnect();
         _manualStopRequested = true;
         _currentRequest = null;
+        UpdateNowPlayingLogo(string.Empty);
         ResetRecordingState();
         ResetNetworkDebit();
         StopBufferingStatusUpdates();
@@ -215,6 +219,50 @@ public partial class PlayerWindow : Window
     {
         var normalizedPath = recordingFilePath.Replace('\\', '/').Replace("'", "\\'");
         return $":sout=#duplicate{{dst=display,dst=std{{access=file,mux=ts,dst='{normalizedPath}'}}}}";
+    }
+
+    private void UpdateNowPlayingLogo(string logoSource)
+    {
+        var source = CreateLogoSource(logoSource);
+        NowPlayingLogoImage.Source = source;
+        NowPlayingLogoImage.Visibility = source is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private static ImageSource? CreateLogoSource(string logoSource)
+    {
+        if (string.IsNullOrWhiteSpace(logoSource))
+        {
+            return null;
+        }
+
+        Uri? uri;
+        if (File.Exists(logoSource))
+        {
+            uri = new Uri(logoSource, UriKind.Absolute);
+        }
+        else if (!Uri.TryCreate(logoSource, UriKind.Absolute, out uri))
+        {
+            return null;
+        }
+
+        try
+        {
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.UriSource = uri;
+            if (uri.IsFile)
+            {
+                image.CacheOption = BitmapCacheOption.OnLoad;
+                image.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
+            }
+
+            image.EndInit();
+            return image;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private void HandlePlaybackInterruption(string reason)
