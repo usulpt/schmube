@@ -655,6 +655,24 @@ public sealed class GroupFlagStore
             return false;
         }
 
+        if (IsDstvVipGroup(trimmedGroup))
+        {
+            result = new GroupFlagInfo(BuildGroupAssetPath("dstv.png"), "DSTV");
+            return !string.IsNullOrWhiteSpace(result.Flag);
+        }
+
+        if (IsCanalPlusAfricaVipGroup(trimmedGroup))
+        {
+            result = new GroupFlagInfo(BuildGroupAssetPath("canalplus-africa.png"), "Canal+ Africa");
+            return !string.IsNullOrWhiteSpace(result.Flag);
+        }
+
+        if (IsAsia24SevenGroup(trimmedGroup))
+        {
+            result = new GroupFlagInfo(BuildFlagAssetPath("IN"), "India");
+            return !string.IsNullOrWhiteSpace(result.Flag);
+        }
+
         if (IsAfricaRegionalGroup(trimmedGroup)
             && TryResolveAfricaChannelPrefix(trimmedTitle, out result))
         {
@@ -795,6 +813,24 @@ public sealed class GroupFlagStore
             return false;
         }
 
+        if (IsDstvVipGroup(trimmedTitle))
+        {
+            result = new GroupFlagInfo(BuildGroupAssetPath("dstv.png"), "DSTV");
+            return !string.IsNullOrWhiteSpace(result.Flag);
+        }
+
+        if (IsCanalPlusAfricaVipGroup(trimmedTitle))
+        {
+            result = new GroupFlagInfo(BuildGroupAssetPath("canalplus-africa.png"), "Canal+ Africa");
+            return !string.IsNullOrWhiteSpace(result.Flag);
+        }
+
+        if (IsAsia24SevenGroup(trimmedTitle))
+        {
+            result = new GroupFlagInfo(BuildFlagAssetPath("IN"), "India");
+            return !string.IsNullOrWhiteSpace(result.Flag);
+        }
+
         if (trimmedTitle.StartsWith("ASIA|", StringComparison.CurrentCultureIgnoreCase)
             || trimmedTitle.StartsWith("ASIA:", StringComparison.CurrentCultureIgnoreCase)
             || trimmedTitle.StartsWith("ASIA/", StringComparison.CurrentCultureIgnoreCase)
@@ -817,6 +853,25 @@ public sealed class GroupFlagStore
         }
 
         return false;
+    }
+
+    private static bool IsAsia24SevenGroup(string title)
+    {
+        return (title ?? string.Empty).Trim().StartsWith("ASIA| 24/7", StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private static bool IsDstvVipGroup(string title)
+    {
+        var trimmedTitle = (title ?? string.Empty).Trim();
+        return trimmedTitle.StartsWith("AFR| DSTV VIP HD/4K", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("AFR|DSTV VIP HD/4K", StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private static bool IsCanalPlusAfricaVipGroup(string title)
+    {
+        var trimmedTitle = (title ?? string.Empty).Trim();
+        return trimmedTitle.StartsWith("AFR| CANAL+ VIP HD/4K", StringComparison.CurrentCultureIgnoreCase)
+            || trimmedTitle.StartsWith("AFR|CANAL+ VIP HD/4K", StringComparison.CurrentCultureIgnoreCase);
     }
 
     private bool TryResolveRegionalCountryFromSegments(string title, string regionMarker, out GroupFlagInfo result)
@@ -927,6 +982,23 @@ public sealed class GroupFlagStore
             "Assets",
             "Flags",
             $"{normalized.ToLowerInvariant()}.png");
+
+        return File.Exists(assetPath) ? assetPath : string.Empty;
+    }
+
+    private static string BuildGroupAssetPath(string fileName)
+    {
+        var normalizedFileName = Path.GetFileName(fileName ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(normalizedFileName))
+        {
+            return string.Empty;
+        }
+
+        var assetPath = Path.Combine(
+            AppContext.BaseDirectory,
+            "Assets",
+            "Flags",
+            normalizedFileName);
 
         return File.Exists(assetPath) ? assetPath : string.Empty;
     }

@@ -238,6 +238,16 @@
                 <Button x:Name="LoadChannelsButton" Width="106" Height="32" Margin="0,0,8,0" Content="Load Channels" Click="LoadChannelsButton_Click" ToolTip="Fetch channels from the configured playlist or Xtream account." />
                 <Button x:Name="TvListingsButton" Width="92" Height="32" Margin="0,0,8,0" Content="TV Listings" Click="TvListingsButton_Click" ToolTip="Open a football match page, generate compatible playlist channels from its broadcaster listing, and load them as a temporary navigation list." />
                 <Button x:Name="ClearTempListButton" Width="92" Height="32" Margin="0,0,8,0" Content="Clear Temp" Click="ClearTempListButton_Click" ToolTip="Clear the active temporary channel list created from TV listings results." />
+                <Button x:Name="ExportM3uButton" Width="92" Height="32" Margin="0,0,8,0" Content="Export M3U" Click="ExportM3uButton_Click" ToolTip="Export all loaded channels, the selected group, the current visible list, or the active temporary list to an M3U file.">
+                    <Button.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem x:Name="ExportAllM3uMenuItem" Header="Complete list" Click="ExportAllM3uMenuItem_Click" />
+                            <MenuItem x:Name="ExportSelectedGroupM3uMenuItem" Header="Selected group" Click="ExportSelectedGroupM3uMenuItem_Click" />
+                            <MenuItem x:Name="ExportVisibleM3uMenuItem" Header="Current visible list" Click="ExportVisibleM3uMenuItem_Click" />
+                            <MenuItem x:Name="ExportTemporaryM3uMenuItem" Header="Temporary list" Click="ExportTemporaryM3uMenuItem_Click" />
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                </Button>
                 <Button x:Name="PlaySelectedButton" Width="102" Height="32" Margin="0,0,8,0" Content="Play Selected" Click="PlaySelectedButton_Click" ToolTip="Play the currently selected channel in the player window." />
                 <Button x:Name="PlayUrlButton" Width="86" Height="32" Margin="0,0,8,0" Content="Play URL" Click="PlayUrlButton_Click" ToolTip="Play the raw URL above directly when it is a single stream." />
                 <Button x:Name="OpenPlayerButton" Width="96" Height="32" Margin="0,0,8,0" Content="Open Player" Click="OpenPlayerButton_Click" ToolTip="Open the separate resizable player window without starting playback." />
@@ -383,10 +393,10 @@
                         <GridView AllowsColumnReorder="False">
                             <GridViewColumn Header="Fav" Width="38" DisplayMemberBinding="{Binding FavoriteMarker}" />
                             <GridViewColumn Header="Recent" Width="52" DisplayMemberBinding="{Binding RecentMarker}" />
-                            <GridViewColumn Header="Flag" Width="56">
+                            <GridViewColumn Header="Flag" Width="96">
                                 <GridViewColumn.CellTemplate>
                                     <DataTemplate>
-                                        <Border Width="36"
+                                        <Border Width="84"
                                                 Height="24"
                                                 Padding="0"
                                                 CornerRadius="6"
@@ -405,9 +415,9 @@
                                                     </Style.Triggers>
                                                 </Style>
                                             </Border.Style>
-                                            <Image Width="32"
+                                            <Image Width="80"
                                                    Height="22"
-                                                   Stretch="UniformToFill"
+                                                   Stretch="Uniform"
                                                    Source="{Binding GroupFlag}" />
                                         </Border>
                                     </DataTemplate>
@@ -483,4 +493,3 @@
         </Border>
     </Grid>
 </Window>
-

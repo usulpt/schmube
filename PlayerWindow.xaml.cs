@@ -1,25 +1,77 @@
 using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net.NetworkInformation;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Threading;
 using LibVLCSharp.Shared;
 
 namespace Schmube;
 
 public partial class PlayerWindow : Window
 {
+    private struct NetworkDebitSampler
+    {
+        private long _lastBytes;
+        private long _lastTimestamp;
+        private bool _hasSample;
+
+        public double MegabitsPerSecond { get; private set; }
+
+        public void Clear()
+        {
+            _lastBytes = 0;
+            _lastTimestamp = 0;
+            _hasSample = false;
+            MegabitsPerSecond = 0;
+        }
+
+        public void Reset(long byteCount, long timestamp)
+        {
+            _lastBytes = byteCount;
+            _lastTimestamp = timestamp;
+            _hasSample = true;
+            MegabitsPerSecond = 0;
+        }
+
+        public double Sample(long byteCount, long timestamp)
+        {
+            if (!_hasSample || byteCount < _lastBytes)
+            {
+                Reset(byteCount, timestamp);
+                return MegabitsPerSecond;
+            }
+
+            var elapsedSeconds = Stopwatch.GetElapsedTime(_lastTimestamp, timestamp).TotalSeconds;
+            var bytesRead = byteCount - _lastBytes;
+            if (elapsedSeconds > 0 && bytesRead >= 0)
+            {
+                MegabitsPerSecond = bytesRead * BitsPerByte / elapsedSeconds / BitsPerMegabit;
+            }
+
+            _lastBytes = byteCount;
+            _lastTimestamp = timestamp;
+            return MegabitsPerSecond;
+        }
+    }
+
     private const int MaxReconnectAttempts = 3;
     private const int DefaultVolume = 100;
     private const int VolumeStep = 10;
+    private const double BitsPerByte = 8;
+    private const double BitsPerMegabit = 1_000_000;
     private const string ScreenshotsFolderName = "Schmube\\Screenshots";
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(3);
 
     private readonly LibVLC _libVlc;
     private readonly MediaPlayer _mediaPlayer;
+    private readonly DispatcherTimer _networkDebitStatusTimer = new() { Interval = TimeSpan.FromSeconds(1) };
 
     private Media? _currentMedia;
     private PlaybackRequest? _currentRequest;
@@ -33,6 +85,13 @@ public partial class PlayerWindow : Window
     private WindowState _restoreWindowState = WindowState.Normal;
     private WindowStyle _restoreWindowStyle = WindowStyle.SingleBorderWindow;
     private ResizeMode _restoreResizeMode = ResizeMode.CanResize;
+    private double _networkDebitMegabitsPerSecond;
+    private NetworkDebitSampler _libVlcNetworkDebitSampler;
+    private NetworkDebitSampler _processIoNetworkDebitSampler;
+    private NetworkDebitSampler _networkInterfaceDebitSampler;
+    private bool _isBuffering;
+    private bool _showNetworkDebit;
+    private float _lastBufferingCache;
 
     public event EventHandler<int>? ChannelStepRequested;
 
@@ -47,13 +106,15 @@ public partial class PlayerWindow : Window
         _mediaPlayer.Volume = DefaultVolume;
         VideoSurface.MediaPlayer = _mediaPlayer;
 
-        _mediaPlayer.Playing += (_, _) => SetStatus("Playing.");
-        _mediaPlayer.Buffering += (_, e) => SetStatus($"Buffering {e.Cache:0}%");
+        _networkDebitStatusTimer.Tick += (_, _) => RefreshBufferingStatus();
+
+        _mediaPlayer.Playing += (_, _) => SetPlaybackStatus("Playing.");
+        _mediaPlayer.Buffering += (_, e) => SetBufferingStatus(e.Cache);
         _mediaPlayer.Stopped += (_, _) =>
         {
             if (_manualStopRequested)
             {
-                SetStatus("Stopped.");
+                SetPlaybackStatus("Stopped.");
             }
         };
         _mediaPlayer.EndReached += (_, _) => HandlePlaybackInterruption("Stream ended.");
@@ -63,6 +124,7 @@ public partial class PlayerWindow : Window
 
         UpdateRecordingVisualState();
         UpdateAudioVisualState();
+        UpdateNetworkDebitVisualState();
         UpdateScreenshotButtonState();
     }
 
@@ -93,6 +155,8 @@ public partial class PlayerWindow : Window
         _manualStopRequested = true;
         _currentRequest = null;
         ResetRecordingState();
+        ResetNetworkDebit();
+        StopBufferingStatusUpdates();
 
         if (_mediaPlayer.IsPlaying)
         {
@@ -120,6 +184,8 @@ public partial class PlayerWindow : Window
     private void StartPlaybackCore(PlaybackRequest request, bool isReconnect)
     {
         _currentMedia?.Dispose();
+        ResetNetworkDebit();
+        StopBufferingStatusUpdates();
         _currentMedia = CreateMedia(request);
 
         SetStatus(isReconnect
@@ -362,10 +428,217 @@ public partial class PlayerWindow : Window
         ToggleMuteButton.Content = _mediaPlayer.Mute ? "Unmute" : "Mute";
     }
 
+    private void UpdateNetworkDebitVisualState()
+    {
+        ToggleNetworkDebitButton.Content = _showNetworkDebit ? "Net On" : "Net Off";
+    }
+
     private string BuildAudioStatusText()
     {
         var volume = Math.Max(_mediaPlayer.Volume, 0);
         return _mediaPlayer.Mute ? $"Muted ({volume}%)" : $"Volume {volume}%";
+    }
+
+    private void SetPlaybackStatus(string status)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => SetPlaybackStatus(status));
+            return;
+        }
+
+        StopBufferingStatusUpdates();
+        SetStatus(status);
+    }
+
+    private void SetBufferingStatus(float cache)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => SetBufferingStatus(cache));
+            return;
+        }
+
+        _lastBufferingCache = cache;
+        _isBuffering = true;
+        if (_showNetworkDebit && !_networkDebitStatusTimer.IsEnabled)
+        {
+            _networkDebitStatusTimer.Start();
+        }
+
+        SetStatus(BuildBufferingStatusText(cache));
+    }
+
+    private void RefreshBufferingStatus()
+    {
+        if (!_showNetworkDebit || !_isBuffering || _currentRequest is null)
+        {
+            StopBufferingStatusUpdates();
+            return;
+        }
+
+        SetStatus(BuildBufferingStatusText(_lastBufferingCache));
+    }
+
+    private void StopBufferingStatusUpdates()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(StopBufferingStatusUpdates);
+            return;
+        }
+
+        _isBuffering = false;
+        _networkDebitStatusTimer.Stop();
+    }
+
+    private string BuildBufferingStatusText(float cache)
+    {
+        if (!_showNetworkDebit)
+        {
+            return string.Create(CultureInfo.CurrentCulture, $"Buffering {cache:0}%");
+        }
+
+        return string.Create(
+            CultureInfo.CurrentCulture,
+            $"Buffering {cache:0}% | Network {GetNetworkDebitMegabitsPerSecond():0.0} Mb/s");
+    }
+
+    private double GetNetworkDebitMegabitsPerSecond()
+    {
+        if (_currentRequest is null)
+        {
+            return 0;
+        }
+
+        var timestamp = Stopwatch.GetTimestamp();
+        var libVlcDebit = 0.0;
+        var processIoDebit = 0.0;
+        var networkInterfaceDebit = 0.0;
+        if (TryGetLibVlcByteCount(out var libVlcByteCount))
+        {
+            libVlcDebit = _libVlcNetworkDebitSampler.Sample(libVlcByteCount, timestamp);
+        }
+
+        if (TryGetProcessIoReadByteCount(out var processIoByteCount))
+        {
+            processIoDebit = _processIoNetworkDebitSampler.Sample(processIoByteCount, timestamp);
+        }
+
+        if (TryGetNetworkInterfaceReadByteCount(out var networkInterfaceByteCount))
+        {
+            networkInterfaceDebit = _networkInterfaceDebitSampler.Sample(networkInterfaceByteCount, timestamp);
+        }
+
+        _networkDebitMegabitsPerSecond = libVlcDebit > 0 ? libVlcDebit
+            : processIoDebit > 0 ? processIoDebit
+            : networkInterfaceDebit > 0 ? networkInterfaceDebit
+            : _networkDebitMegabitsPerSecond;
+
+        return _networkDebitMegabitsPerSecond;
+    }
+
+    private void ResetNetworkDebit()
+    {
+        _networkDebitMegabitsPerSecond = 0;
+        if (!_showNetworkDebit)
+        {
+            _libVlcNetworkDebitSampler.Clear();
+            _processIoNetworkDebitSampler.Clear();
+            _networkInterfaceDebitSampler.Clear();
+            return;
+        }
+
+        var timestamp = Stopwatch.GetTimestamp();
+
+        _libVlcNetworkDebitSampler.Clear();
+
+        if (TryGetProcessIoReadByteCount(out var processIoByteCount))
+        {
+            _processIoNetworkDebitSampler.Reset(processIoByteCount, timestamp);
+        }
+        else
+        {
+            _processIoNetworkDebitSampler.Clear();
+        }
+
+        if (TryGetNetworkInterfaceReadByteCount(out var networkInterfaceByteCount))
+        {
+            _networkInterfaceDebitSampler.Reset(networkInterfaceByteCount, timestamp);
+        }
+        else
+        {
+            _networkInterfaceDebitSampler.Clear();
+        }
+    }
+
+    private bool TryGetLibVlcByteCount(out long byteCount)
+    {
+        byteCount = 0;
+        var media = _mediaPlayer.Media ?? _currentMedia;
+        if (media is null)
+        {
+            return false;
+        }
+
+        var statistics = media.Statistics;
+        byteCount = Math.Max(statistics.ReadBytes, statistics.DemuxReadBytes);
+        return byteCount > 0;
+    }
+
+    private static bool TryGetProcessIoReadByteCount(out long byteCount)
+    {
+        byteCount = 0;
+        using var process = Process.GetCurrentProcess();
+        if (!GetProcessIoCounters(process.Handle, out var counters))
+        {
+            return false;
+        }
+
+        byteCount = counters.ReadTransferCount > long.MaxValue
+            ? long.MaxValue
+            : (long)counters.ReadTransferCount;
+        return true;
+    }
+
+    private static bool TryGetNetworkInterfaceReadByteCount(out long byteCount)
+    {
+        byteCount = 0;
+        try
+        {
+            foreach (var networkInterface in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (networkInterface.OperationalStatus != OperationalStatus.Up ||
+                    networkInterface.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel)
+                {
+                    continue;
+                }
+
+                var statistics = networkInterface.GetIPv4Statistics();
+                byteCount = Math.Min(long.MaxValue, byteCount + statistics.BytesReceived);
+            }
+        }
+        catch (NetworkInformationException)
+        {
+            byteCount = 0;
+            return false;
+        }
+
+        return byteCount > 0;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetProcessIoCounters(IntPtr processHandle, out IoCounters ioCounters);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoCounters
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
     }
 
     private void AdjustVolume(int delta)
@@ -386,6 +659,31 @@ public partial class PlayerWindow : Window
         _mediaPlayer.Mute = !_mediaPlayer.Mute;
         UpdateAudioVisualState();
         SetStatus(BuildAudioStatusText());
+    }
+
+    private void ToggleNetworkDebit()
+    {
+        _showNetworkDebit = !_showNetworkDebit;
+        UpdateNetworkDebitVisualState();
+        ResetNetworkDebit();
+
+        if (_showNetworkDebit)
+        {
+            if (_isBuffering && !_networkDebitStatusTimer.IsEnabled)
+            {
+                _networkDebitStatusTimer.Start();
+            }
+
+            SetStatus(_isBuffering
+                ? BuildBufferingStatusText(_lastBufferingCache)
+                : "Network debit display enabled.");
+            return;
+        }
+
+        _networkDebitStatusTimer.Stop();
+        SetStatus(_isBuffering
+            ? BuildBufferingStatusText(_lastBufferingCache)
+            : "Network debit display disabled.");
     }
 
     private void ToggleFullScreen()
@@ -457,6 +755,11 @@ public partial class PlayerWindow : Window
     private void ToggleMuteButton_Click(object sender, RoutedEventArgs e)
     {
         ToggleMute();
+    }
+
+    private void ToggleNetworkDebitButton_Click(object sender, RoutedEventArgs e)
+    {
+        ToggleNetworkDebit();
     }
 
     private void FullScreenButton_Click(object sender, RoutedEventArgs e)
@@ -605,6 +908,7 @@ public partial class PlayerWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         CancelReconnect();
+        _networkDebitStatusTimer.Stop();
         PreviewKeyDown -= PlayerWindow_PreviewKeyDown;
         VideoSurface.MediaPlayer = null;
         _currentMedia?.Dispose();

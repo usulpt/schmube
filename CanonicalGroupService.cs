@@ -17,6 +17,16 @@ public sealed class CanonicalGroupService
             return new CanonicalGroupInfo("RELAX", "Relax");
         }
 
+        if (IsDstvVipGroup(channel.GroupTitle))
+        {
+            return new CanonicalGroupInfo("DSTV", "DSTV");
+        }
+
+        if (IsCanalPlusAfricaVipGroup(channel.GroupTitle))
+        {
+            return new CanonicalGroupInfo("CANALPLUSAFRICA", "Canal+ Africa");
+        }
+
         var countryCode = GetCountryCodeFromFlag(groupFlagInfo.Flag);
         if (!string.IsNullOrWhiteSpace(countryCode))
         {
@@ -93,6 +103,20 @@ public sealed class CanonicalGroupService
             || group.StartsWith("AFR -", StringComparison.CurrentCultureIgnoreCase)
             || group.StartsWith("AFR –", StringComparison.CurrentCultureIgnoreCase)
             || group.StartsWith("AFR —", StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private static bool IsDstvVipGroup(string? groupTitle)
+    {
+        var group = groupTitle?.Trim() ?? string.Empty;
+        return group.StartsWith("AFR| DSTV VIP HD/4K", StringComparison.CurrentCultureIgnoreCase)
+            || group.StartsWith("AFR|DSTV VIP HD/4K", StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private static bool IsCanalPlusAfricaVipGroup(string? groupTitle)
+    {
+        var group = groupTitle?.Trim() ?? string.Empty;
+        return group.StartsWith("AFR| CANAL+ VIP HD/4K", StringComparison.CurrentCultureIgnoreCase)
+            || group.StartsWith("AFR|CANAL+ VIP HD/4K", StringComparison.CurrentCultureIgnoreCase);
     }
 
     private static string CleanLabel(string value)

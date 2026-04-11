@@ -62,6 +62,12 @@
                         Content="Shot"
                         Click="TakeScreenshotButton_Click"
                         ToolTip="Save a screenshot of the current frame (Ctrl+S)." />
+                <Button x:Name="ToggleNetworkDebitButton"
+                        Width="78"
+                        Margin="0,0,8,0"
+                        Content="Net Off"
+                        Click="ToggleNetworkDebitButton_Click"
+                        ToolTip="Show or hide network debit in the buffering status. Off by default." />
                 <Button x:Name="ToggleRecordingButton"
                         Width="104"
                         Margin="0,0,8,0"

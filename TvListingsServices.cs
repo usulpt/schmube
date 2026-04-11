@@ -696,7 +696,17 @@ public sealed class PlaylistChannelMatcher
 
     private static HashSet<string> BuildCountryCodes(PlaylistChannel channel)
     {
+        if (IsAsia24SevenGroup(channel.GroupTitle))
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "IN" };
+        }
+
         var countryCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var code in ResolveRegionalCountryCodes(channel.GroupTitle, "LA"))
+        {
+            countryCodes.Add(code);
+        }
+
         foreach (var source in EnumerateCountrySources(channel))
         {
             foreach (var code in CountryResolver.ResolveCountryCodes(source))
@@ -706,6 +716,40 @@ public sealed class PlaylistChannelMatcher
         }
 
         return countryCodes;
+    }
+
+    private static IEnumerable<string> ResolveRegionalCountryCodes(string groupTitle, string regionMarker)
+    {
+        var trimmedGroup = groupTitle?.Trim() ?? string.Empty;
+        if (!StartsWithRegionalMarker(trimmedGroup, regionMarker))
+        {
+            yield break;
+        }
+
+        foreach (var segment in trimmedGroup
+                     .Split([':', '|', '-', '–', '—', '/'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                     .Skip(1))
+        {
+            foreach (var code in CountryResolver.ResolveCountryCodes(segment))
+            {
+                yield return code;
+            }
+        }
+    }
+
+    private static bool IsAsia24SevenGroup(string groupTitle)
+    {
+        return (groupTitle ?? string.Empty).Trim().StartsWith("ASIA| 24/7", StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private static bool StartsWithRegionalMarker(string value, string regionMarker)
+    {
+        return value.StartsWith($"{regionMarker}|", StringComparison.CurrentCultureIgnoreCase)
+            || value.StartsWith($"{regionMarker}:", StringComparison.CurrentCultureIgnoreCase)
+            || value.StartsWith($"{regionMarker}/", StringComparison.CurrentCultureIgnoreCase)
+            || value.StartsWith($"{regionMarker} -", StringComparison.CurrentCultureIgnoreCase)
+            || value.StartsWith($"{regionMarker} –", StringComparison.CurrentCultureIgnoreCase)
+            || value.StartsWith($"{regionMarker} —", StringComparison.CurrentCultureIgnoreCase);
     }
 
     private static IEnumerable<string> EnumerateCountrySources(PlaylistChannel channel)

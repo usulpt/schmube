@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,6 +11,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using Microsoft.Win32;
 
 namespace Schmube;
 
@@ -95,6 +97,7 @@ public partial class MainWindow : Window
         RegisterFocusHint(LoadChannelsButton, "Load or refresh the channel list from the configured source.");
         RegisterFocusHint(TvListingsButton, "Open a football match page, generate compatible playlist channels from its broadcaster listing, and build a temporary channel list from the current playlist.");
         RegisterFocusHint(ClearTempListButton, "Clear the active temporary channel list created from TV listings results and return to normal browsing.");
+        RegisterFocusHint(ExportM3uButton, "Export loaded channels as an M3U playlist. Use the menu for the complete list, selected group, current visible list, or temporary list.");
         RegisterFocusHint(PlaySelectedButton, "Start playback for the channel currently selected in the list.");
         RegisterFocusHint(PlayUrlButton, "Play the raw URL directly when it points to a single stream rather than a playlist account.");
         RegisterFocusHint(OpenPlayerButton, "Open the separate resizable player window without changing the current stream.");
@@ -146,6 +149,7 @@ public partial class MainWindow : Window
         FavoritesOnlyCheckBox.IsChecked = false;
         RecentOnlyCheckBox.IsChecked = false;
         UpdateTemporaryListUi();
+        UpdateExportM3uUi();
     }
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -795,6 +799,7 @@ public partial class MainWindow : Window
         if (_allChannels.Count == 0)
         {
             ChannelSummaryTextBox.Text = "No channels loaded.";
+            UpdateExportM3uUi();
             return;
         }
 
@@ -831,6 +836,7 @@ public partial class MainWindow : Window
 
         summary += _recentChannelKeys.Count > 0 ? $" Recents tracked: {_recentChannelKeys.Count}." : string.Empty;
         ChannelSummaryTextBox.Text = summary;
+        UpdateExportM3uUi();
     }
 
     private void ApplyTemporaryChannelList(TemporaryChannelListSelection selection)
@@ -872,6 +878,20 @@ public partial class MainWindow : Window
     private void UpdateTemporaryListUi()
     {
         ClearTempListButton.IsEnabled = HasTemporaryChannelList;
+        UpdateExportM3uUi();
+    }
+
+    private void UpdateExportM3uUi()
+    {
+        var hasChannels = _allChannels.Count > 0;
+        var hasSpecificGroup = SelectedGroupOption is { } selectedGroupOption
+            && !string.Equals(selectedGroupOption.Value, AllGroupsLabel, StringComparison.Ordinal);
+
+        ExportM3uButton.IsEnabled = hasChannels;
+        ExportAllM3uMenuItem.IsEnabled = hasChannels;
+        ExportSelectedGroupM3uMenuItem.IsEnabled = hasChannels && hasSpecificGroup;
+        ExportVisibleM3uMenuItem.IsEnabled = _visibleChannels.Count > 0;
+        ExportTemporaryM3uMenuItem.IsEnabled = HasTemporaryChannelList;
     }
 
     private void UpdateSelectedChannelDetails(PlaylistChannel? channel)
@@ -1025,6 +1045,104 @@ public partial class MainWindow : Window
 
         ApplyTemporaryChannelList(listingsWindow.TemporarySelection);
         StatusTextBlock.Text = $"Temporary channel list loaded from {_temporaryListLabel}.";
+    }
+
+    private void ExportM3uButton_Click(object sender, RoutedEventArgs e)
+    {
+        UpdateExportM3uUi();
+        ExportM3uButton.ContextMenu.PlacementTarget = ExportM3uButton;
+        ExportM3uButton.ContextMenu.IsOpen = true;
+    }
+
+    private void ExportAllM3uMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        ExportM3uChannels("complete list", _allChannels, "schmube-complete-list");
+    }
+
+    private void ExportSelectedGroupM3uMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        var selectedGroup = SelectedGroupOption;
+        if (selectedGroup is null || string.Equals(selectedGroup.Value, AllGroupsLabel, StringComparison.Ordinal))
+        {
+            StatusTextBlock.Text = "Select a specific group before exporting a group M3U.";
+            return;
+        }
+
+        var channels = _allChannels
+            .Where(channel => MatchesGroup(channel, selectedGroup.Value))
+            .OrderBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        ExportM3uChannels(selectedGroup.Label, channels, $"schmube-{BuildSafeFileName(selectedGroup.Label)}");
+    }
+
+    private void ExportVisibleM3uMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        ExportM3uChannels("current visible list", _visibleChannels, "schmube-visible-list");
+    }
+
+    private void ExportTemporaryM3uMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (!HasTemporaryChannelList)
+        {
+            StatusTextBlock.Text = "No temporary channel list is active.";
+            return;
+        }
+
+        var channels = _allChannels
+            .Where(channel => _temporaryChannelOrder.ContainsKey(channel.StreamUri.ToString()))
+            .OrderBy(channel => _temporaryChannelOrder[channel.StreamUri.ToString()])
+            .ThenBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        var label = string.IsNullOrWhiteSpace(_temporaryListLabel) ? "temporary list" : _temporaryListLabel;
+
+        ExportM3uChannels(label, channels, $"schmube-temp-{BuildSafeFileName(label)}");
+    }
+
+    private void ExportM3uChannels(string label, IEnumerable<PlaylistChannel> channels, string defaultFileName)
+    {
+        var channelList = channels.ToList();
+        if (channelList.Count == 0)
+        {
+            StatusTextBlock.Text = $"No channels available to export for {label}.";
+            return;
+        }
+
+        var dialog = new SaveFileDialog
+        {
+            AddExtension = true,
+            DefaultExt = ".m3u",
+            FileName = $"{BuildSafeFileName(defaultFileName)}.m3u",
+            Filter = "M3U playlists (*.m3u)|*.m3u|M3U8 playlists (*.m3u8)|*.m3u8|All files (*.*)|*.*",
+            OverwritePrompt = true,
+            Title = $"Export {label} to M3U"
+        };
+
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            M3uExportService.Export(dialog.FileName, channelList);
+            StatusTextBlock.Text = $"Exported {channelList.Count} channels to {dialog.FileName}.";
+        }
+        catch (Exception ex)
+        {
+            StatusTextBlock.Text = $"M3U export failed: {ex.Message}";
+        }
+    }
+
+    private static string BuildSafeFileName(string value)
+    {
+        var invalidCharacters = Path.GetInvalidFileNameChars().ToHashSet();
+        var sanitized = new string((value ?? string.Empty)
+            .Select(ch => invalidCharacters.Contains(ch) ? '-' : ch)
+            .ToArray())
+            .Trim(' ', '.', '-');
+
+        return string.IsNullOrWhiteSpace(sanitized) ? "schmube-export" : sanitized;
     }
 
     private void ClearTempListButton_Click(object sender, RoutedEventArgs e)
