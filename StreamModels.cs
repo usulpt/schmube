@@ -18,6 +18,20 @@ public sealed class StreamSettings
     public List<string> RecentChannelKeys { get; set; } = [];
 
     public string LastChannelKey { get; set; } = string.Empty;
+
+    public string SelectedGroupFilter { get; set; } = string.Empty;
+
+    public string SearchText { get; set; } = string.Empty;
+
+    public bool SearchAllGroups { get; set; }
+
+    public bool FavoritesOnly { get; set; }
+
+    public bool RecentOnly { get; set; }
+
+    public string ColumnPreset { get; set; } = string.Empty;
+
+    public Dictionary<string, string> CustomChannelGroups { get; set; } = [];
 }
 
 public sealed class GroupFilterOption
@@ -35,7 +49,7 @@ public sealed class GroupFilterOption
 
 public sealed class PlaybackRequest
 {
-    public PlaybackRequest(Uri streamUri, bool keepPlayerOnTop, string displayName, bool allowReconnect, string recordingsDirectory, string logoSource = "")
+    public PlaybackRequest(Uri streamUri, bool keepPlayerOnTop, string displayName, bool allowReconnect, string recordingsDirectory, string logoSource = "", string fallbackLogoSource = "")
     {
         StreamUri = streamUri;
         KeepPlayerOnTop = keepPlayerOnTop;
@@ -43,6 +57,7 @@ public sealed class PlaybackRequest
         AllowReconnect = allowReconnect;
         RecordingsDirectory = recordingsDirectory;
         LogoSource = logoSource;
+        FallbackLogoSource = fallbackLogoSource;
     }
 
     public Uri StreamUri { get; }
@@ -56,6 +71,8 @@ public sealed class PlaybackRequest
     public string RecordingsDirectory { get; }
 
     public string LogoSource { get; }
+
+    public string FallbackLogoSource { get; }
 }
 
 public sealed class PlaylistChannel : INotifyPropertyChanged

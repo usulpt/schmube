@@ -9,6 +9,33 @@
         MinHeight="320"
         Icon="Assets/AppIcon.ico"
         WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <Style x:Key="PlayerStateButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="Active">
+                    <Setter Property="Background" Value="{DynamicResource SelectionBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource SelectionTextBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource SelectionBrush}" />
+                    <Setter Property="BorderThickness" Value="2" />
+                    <Setter Property="FontWeight" Value="SemiBold" />
+                </Trigger>
+                <Trigger Property="Tag" Value="Recording">
+                    <Setter Property="Background" Value="#DC2626" />
+                    <Setter Property="Foreground" Value="White" />
+                    <Setter Property="BorderBrush" Value="#F87171" />
+                    <Setter Property="BorderThickness" Value="2" />
+                    <Setter Property="FontWeight" Value="SemiBold" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="PlayerBadgeStyle" TargetType="TextBlock">
+            <Setter Property="Padding" Value="8,2" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Foreground" Value="{DynamicResource SelectionTextBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SelectionBrush}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+    </Window.Resources>
     <Grid Background="{DynamicResource PlayerBackgroundBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -16,10 +43,16 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <DockPanel x:Name="PlayerToolbar" Grid.Row="0" Background="{DynamicResource PlayerChromeBrush}" LastChildFill="True" Height="46">
-            <StackPanel DockPanel.Dock="Left"
+        <Grid x:Name="PlayerToolbar" Grid.Row="0" Background="{DynamicResource PlayerChromeBrush}" MinHeight="58">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" MinWidth="160" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0"
                         Orientation="Horizontal"
-                        Margin="10,6,0,6">
+                        Margin="10,8,0,8">
                 <Button Width="58"
                         Margin="0,0,8,0"
                         Content="Prev"
@@ -32,63 +65,19 @@
                         ToolTip="Next visible channel (Page Down or Ctrl+Right)." />
             </StackPanel>
 
-            <StackPanel DockPanel.Dock="Right"
-                        Orientation="Horizontal"
-                        Margin="0,6,10,6">
-                <Button Width="52"
-                        Margin="0,0,8,0"
-                        Content="Vol -"
-                        Click="VolumeDownButton_Click"
-                        ToolTip="Lower volume (Down Arrow)." />
-                <Button x:Name="ToggleMuteButton"
-                        Width="72"
-                        Margin="0,0,8,0"
-                        Content="Mute"
-                        Click="ToggleMuteButton_Click"
-                        ToolTip="Mute or unmute audio (M)." />
-                <Button Width="52"
-                        Margin="0,0,8,0"
-                        Content="Vol +"
-                        Click="VolumeUpButton_Click"
-                        ToolTip="Raise volume (Up Arrow)." />
-                <Button x:Name="FullScreenButton"
-                        Width="64"
-                        Margin="0,0,8,0"
-                        Content="Full"
-                        Click="FullScreenButton_Click"
-                        ToolTip="Toggle full screen (F or Alt+Enter, Escape to exit)." />
-                <Button x:Name="TakeScreenshotButton"
-                        Width="72"
-                        Margin="0,0,8,0"
-                        Content="Shot"
-                        Click="TakeScreenshotButton_Click"
-                        ToolTip="Save a screenshot of the current frame (Ctrl+S)." />
-                <Button x:Name="ToggleNetworkDebitButton"
-                        Width="78"
-                        Margin="0,0,8,0"
-                        Content="Net Off"
-                        Click="ToggleNetworkDebitButton_Click"
-                        ToolTip="Show or hide network debit in the buffering status. Off by default." />
-                <Button x:Name="ToggleRecordingButton"
-                        Width="104"
-                        Margin="0,0,8,0"
-                        Content="Start Rec"
-                        Click="ToggleRecordingButton_Click" />
-                <Button x:Name="OpenRecordingsButton"
-                        Width="120"
-                        Margin="0,0,8,0"
-                        Content="Open Folder"
-                        Click="OpenRecordingsButton_Click" />
-                <Button Width="90"
-                        Content="Stop"
-                        Click="StopButton_Click" />
-            </StackPanel>
+            <Grid Grid.Column="1"
+                  Margin="12,0,12,0"
+                  VerticalAlignment="Center">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
-            <StackPanel Margin="12,0,12,0"
-                        VerticalAlignment="Center">
-                <StackPanel Orientation="Horizontal"
-                            VerticalAlignment="Center">
+                <DockPanel Grid.Row="0"
+                           LastChildFill="True"
+                           VerticalAlignment="Center">
                     <Image x:Name="NowPlayingLogoImage"
+                           DockPanel.Dock="Left"
                            Width="28"
                            Height="24"
                            Margin="0,0,8,0"
@@ -97,10 +86,19 @@
                     <TextBlock x:Name="NowPlayingText"
                                VerticalAlignment="Center"
                                Foreground="{DynamicResource InverseTextBrush}"
+                               TextTrimming="CharacterEllipsis"
                                Text="No stream loaded" />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal">
+                </DockPanel>
+
+                <DockPanel Grid.Row="1"
+                           LastChildFill="True">
+                    <TextBlock x:Name="PlaybackStateBadgeText"
+                               DockPanel.Dock="Left"
+                               Style="{StaticResource PlayerBadgeStyle}"
+                               Text="Idle" />
                     <TextBlock x:Name="RecordingText"
+                               DockPanel.Dock="Left"
+                               Style="{StaticResource PlayerBadgeStyle}"
                                Margin="0,0,12,0"
                                Foreground="{DynamicResource DangerTextBrush}"
                                FontWeight="SemiBold"
@@ -109,10 +107,64 @@
                     <TextBlock x:Name="VolumeText"
                                Foreground="{DynamicResource AccentTextBrush}"
                                FontWeight="SemiBold"
+                               MinWidth="92"
+                               TextTrimming="CharacterEllipsis"
                                Text="Volume 100%" />
-                </StackPanel>
+                </DockPanel>
+            </Grid>
+
+            <StackPanel Grid.Column="2"
+                        Margin="0,8,10,8"
+                        VerticalAlignment="Center"
+                        Orientation="Horizontal">
+                <Button Width="52"
+                        Margin="0,0,6,0"
+                        Content="Vol -"
+                        Click="VolumeDownButton_Click"
+                        ToolTip="Lower volume (Down Arrow)." />
+                <Button x:Name="ToggleMuteButton"
+                        Style="{StaticResource PlayerStateButtonStyle}"
+                        Width="66"
+                        Margin="0,0,6,0"
+                        Content="Mute"
+                        Click="ToggleMuteButton_Click"
+                        ToolTip="Mute or unmute audio (M)." />
+                <Button Width="52"
+                        Margin="0,0,6,0"
+                        Content="Vol +"
+                        Click="VolumeUpButton_Click"
+                        ToolTip="Raise volume (Up Arrow)." />
+                <Button x:Name="FullScreenButton"
+                        Width="58"
+                        Margin="0,0,6,0"
+                        Content="Full"
+                        Click="FullScreenButton_Click"
+                        ToolTip="Toggle full screen (F or Alt+Enter, Escape to exit)." />
+                <Button x:Name="TakeScreenshotButton"
+                        Width="62"
+                        Margin="0,0,6,0"
+                        Content="Shot"
+                        Click="TakeScreenshotButton_Click"
+                        ToolTip="Save a screenshot of the current frame (Ctrl+S)." />
+                <Button x:Name="ToggleNetworkDebitButton"
+                        Style="{StaticResource PlayerStateButtonStyle}"
+                        Width="58"
+                        Margin="0,0,6,0"
+                        Content="Net"
+                        Click="ToggleNetworkDebitButton_Click"
+                        ToolTip="Show or hide network debit in the buffering status. Off by default." />
+                <Button x:Name="ToggleRecordingButton"
+                        Style="{StaticResource PlayerStateButtonStyle}"
+                        Width="76"
+                        Margin="0,0,6,0"
+                        Content="Record"
+                        Click="ToggleRecordingButton_Click" />
+                <Button x:Name="OpenRecordingsButton"
+                        Width="76"
+                        Content="Folder"
+                        Click="OpenRecordingsButton_Click" />
             </StackPanel>
-        </DockPanel>
+        </Grid>
 
         <vlc:VideoView x:Name="VideoSurface"
                        Grid.Row="1"

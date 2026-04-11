@@ -68,12 +68,14 @@ public partial class PlayerWindow : Window
     private const int VolumeStep = 10;
     private const double BitsPerByte = 8;
     private const double BitsPerMegabit = 1_000_000;
+    private const float BufferingCompleteCacheThreshold = 99.5f;
     private const string ScreenshotsFolderName = "Schmube\\Screenshots";
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(3);
 
     private readonly LibVLC _libVlc;
     private readonly MediaPlayer _mediaPlayer;
     private readonly DispatcherTimer _networkDebitStatusTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DispatcherTimer _recordingTimer = new() { Interval = TimeSpan.FromSeconds(1) };
 
     private Media? _currentMedia;
     private PlaybackRequest? _currentRequest;
@@ -82,6 +84,7 @@ public partial class PlayerWindow : Window
     private int _reconnectAttempt;
     private bool _isRecording;
     private string _recordingFilePath = string.Empty;
+    private DateTime _recordingStartedAt;
     private bool _keepPlayerOnTopRequested;
     private bool _isFullScreen;
     private WindowState _restoreWindowState = WindowState.Normal;
@@ -96,6 +99,7 @@ public partial class PlayerWindow : Window
     private float _lastBufferingCache;
 
     public event EventHandler<int>? ChannelStepRequested;
+    public event EventHandler? PlaybackStopped;
 
     public PlayerWindow()
     {
@@ -109,6 +113,7 @@ public partial class PlayerWindow : Window
         VideoSurface.MediaPlayer = _mediaPlayer;
 
         _networkDebitStatusTimer.Tick += (_, _) => RefreshBufferingStatus();
+        _recordingTimer.Tick += (_, _) => UpdateRecordingTimerText();
 
         _mediaPlayer.Playing += (_, _) => SetPlaybackStatus("Playing.");
         _mediaPlayer.Buffering += (_, e) => SetBufferingStatus(e.Cache);
@@ -142,7 +147,7 @@ public partial class PlayerWindow : Window
 
             SetAlwaysOnTop(request.KeepPlayerOnTop);
             NowPlayingText.Text = request.DisplayName;
-            UpdateNowPlayingLogo(request.LogoSource);
+            UpdateNowPlayingLogo(request.LogoSource, request.FallbackLogoSource);
             Title = $"Schmube Player - {request.DisplayName}";
 
             StartPlaybackCore(request, isReconnect: false);
@@ -157,7 +162,7 @@ public partial class PlayerWindow : Window
         CancelReconnect();
         _manualStopRequested = true;
         _currentRequest = null;
-        UpdateNowPlayingLogo(string.Empty);
+        UpdateNowPlayingLogo(string.Empty, string.Empty);
         ResetRecordingState();
         ResetNetworkDebit();
         StopBufferingStatusUpdates();
@@ -168,10 +173,12 @@ public partial class PlayerWindow : Window
         }
         else
         {
+            SetPlaybackBadge("Stopped");
             SetStatus("Stopped.");
         }
 
         UpdateScreenshotButtonState();
+        PlaybackStopped?.Invoke(this, EventArgs.Empty);
     }
 
     public void SetAlwaysOnTop(bool isOnTop)
@@ -195,6 +202,7 @@ public partial class PlayerWindow : Window
         SetStatus(isReconnect
             ? $"Reconnecting to {request.DisplayName}..."
             : $"Connecting to {request.DisplayName}...");
+        SetPlaybackBadge(isReconnect ? "Reconnecting" : "Connecting");
 
         var started = _mediaPlayer.Play(_currentMedia);
         if (!started)
@@ -221,9 +229,9 @@ public partial class PlayerWindow : Window
         return $":sout=#duplicate{{dst=display,dst=std{{access=file,mux=ts,dst='{normalizedPath}'}}}}";
     }
 
-    private void UpdateNowPlayingLogo(string logoSource)
+    private void UpdateNowPlayingLogo(string logoSource, string fallbackLogoSource)
     {
-        var source = CreateLogoSource(logoSource);
+        var source = CreateLogoSource(ResolveLogoFallback(logoSource, fallbackLogoSource));
         NowPlayingLogoImage.Source = source;
         NowPlayingLogoImage.Visibility = source is null ? Visibility.Collapsed : Visibility.Visible;
     }
@@ -240,7 +248,7 @@ public partial class PlayerWindow : Window
         {
             uri = new Uri(logoSource, UriKind.Absolute);
         }
-        else if (!Uri.TryCreate(logoSource, UriKind.Absolute, out uri))
+        else if (!Uri.TryCreate(logoSource, UriKind.RelativeOrAbsolute, out uri))
         {
             return null;
         }
@@ -263,6 +271,11 @@ public partial class PlayerWindow : Window
         {
             return null;
         }
+    }
+
+    private static string ResolveLogoFallback(string logoSource, string fallbackLogoSource)
+    {
+        return string.IsNullOrWhiteSpace(logoSource) ? fallbackLogoSource : logoSource;
     }
 
     private void HandlePlaybackInterruption(string reason)
@@ -288,12 +301,16 @@ public partial class PlayerWindow : Window
         if (!_currentRequest.AllowReconnect)
         {
             SetStatus(reason);
+            SetPlaybackBadge(reason);
+            PlaybackStopped?.Invoke(this, EventArgs.Empty);
             return;
         }
 
         if (_reconnectAttempt >= MaxReconnectAttempts)
         {
             SetStatus($"{reason} Auto-reconnect gave up after {MaxReconnectAttempts} attempts.");
+            SetPlaybackBadge("Reconnect failed");
+            PlaybackStopped?.Invoke(this, EventArgs.Empty);
             return;
         }
 
@@ -384,6 +401,7 @@ public partial class PlayerWindow : Window
             var completedFile = _recordingFilePath;
             _isRecording = false;
             _recordingFilePath = string.Empty;
+            _recordingStartedAt = default;
             UpdateRecordingVisualState();
             StartPlaybackCore(request, isReconnect: false);
             SetStatus($"Recording stopped. Saved to {completedFile}");
@@ -395,6 +413,7 @@ public partial class PlayerWindow : Window
 
         _recordingFilePath = Path.Combine(recordingsDirectory, BuildRecordingFileName(request.DisplayName));
         _isRecording = true;
+        _recordingStartedAt = DateTime.Now;
         UpdateRecordingVisualState();
         StartPlaybackCore(request, isReconnect: false);
         SetStatus($"Recording to {_recordingFilePath}");
@@ -451,6 +470,7 @@ public partial class PlayerWindow : Window
     {
         _isRecording = false;
         _recordingFilePath = string.Empty;
+        _recordingStartedAt = default;
         UpdateRecordingVisualState();
     }
 
@@ -463,22 +483,42 @@ public partial class PlayerWindow : Window
     {
         ToggleRecordingButton.IsEnabled = _currentRequest is not null;
         OpenRecordingsButton.IsEnabled = true;
-        ToggleRecordingButton.Content = _isRecording ? "Stop Rec" : "Start Rec";
+        ToggleRecordingButton.Content = _isRecording ? "Stop" : "Record";
+        ToggleRecordingButton.Tag = _isRecording ? "Recording" : null;
         RecordingText.Visibility = _isRecording ? Visibility.Visible : Visibility.Collapsed;
-        RecordingText.Text = _isRecording
-            ? $"REC {Path.GetFileName(_recordingFilePath)}"
-            : string.Empty;
+        if (_isRecording)
+        {
+            UpdateRecordingTimerText();
+            _recordingTimer.Start();
+        }
+        else
+        {
+            _recordingTimer.Stop();
+            RecordingText.Text = string.Empty;
+        }
+    }
+
+    private void UpdateRecordingTimerText()
+    {
+        if (!_isRecording || _recordingStartedAt == default)
+        {
+            return;
+        }
+
+        RecordingText.Text = $"REC {DateTime.Now - _recordingStartedAt:hh\\:mm\\:ss}";
     }
 
     private void UpdateAudioVisualState()
     {
         VolumeText.Text = BuildAudioStatusText();
         ToggleMuteButton.Content = _mediaPlayer.Mute ? "Unmute" : "Mute";
+        ToggleMuteButton.Tag = _mediaPlayer.Mute ? "Active" : null;
     }
 
     private void UpdateNetworkDebitVisualState()
     {
-        ToggleNetworkDebitButton.Content = _showNetworkDebit ? "Net On" : "Net Off";
+        ToggleNetworkDebitButton.Content = "Net";
+        ToggleNetworkDebitButton.Tag = _showNetworkDebit ? "Active" : null;
     }
 
     private string BuildAudioStatusText()
@@ -496,6 +536,7 @@ public partial class PlayerWindow : Window
         }
 
         StopBufferingStatusUpdates();
+        SetPlaybackBadge(status.TrimEnd('.'));
         SetStatus(status);
     }
 
@@ -508,7 +549,16 @@ public partial class PlayerWindow : Window
         }
 
         _lastBufferingCache = cache;
+        if (_mediaPlayer.IsPlaying && cache >= BufferingCompleteCacheThreshold)
+        {
+            StopBufferingStatusUpdates();
+            SetPlaybackBadge("Playing");
+            SetStatus("Playing.");
+            return;
+        }
+
         _isBuffering = true;
+        SetPlaybackBadge("Buffering");
         if (_showNetworkDebit && !_networkDebitStatusTimer.IsEnabled)
         {
             _networkDebitStatusTimer.Start();
@@ -538,6 +588,11 @@ public partial class PlayerWindow : Window
 
         _isBuffering = false;
         _networkDebitStatusTimer.Stop();
+    }
+
+    private void SetPlaybackBadge(string status)
+    {
+        PlaybackStateBadgeText.Text = string.IsNullOrWhiteSpace(status) ? "Idle" : status;
     }
 
     private string BuildBufferingStatusText(float cache)
@@ -889,11 +944,6 @@ public partial class PlayerWindow : Window
         }
     }
 
-    private void StopButton_Click(object sender, RoutedEventArgs e)
-    {
-        Stop();
-    }
-
     private void TakeScreenshot()
     {
         if (_currentRequest is null || !_mediaPlayer.IsPlaying)
@@ -957,11 +1007,13 @@ public partial class PlayerWindow : Window
     {
         CancelReconnect();
         _networkDebitStatusTimer.Stop();
+        _recordingTimer.Stop();
         PreviewKeyDown -= PlayerWindow_PreviewKeyDown;
         VideoSurface.MediaPlayer = null;
         _currentMedia?.Dispose();
         _mediaPlayer.Dispose();
         _libVlc.Dispose();
+        PlaybackStopped?.Invoke(this, EventArgs.Empty);
         base.OnClosed(e);
     }
 }
