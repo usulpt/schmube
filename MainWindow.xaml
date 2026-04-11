@@ -149,6 +149,17 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="StateButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="FontWeight" Value="Normal" />
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="Active">
+                    <Setter Property="Background" Value="{DynamicResource SelectionBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource SelectionTextBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource SelectionBrush}" />
+                    <Setter Property="FontWeight" Value="SemiBold" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
 
     <Grid Margin="14">
@@ -156,42 +167,53 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Margin="0,0,0,10">
-            <TextBlock FontSize="26" FontWeight="SemiBold" Text="Schmube" />
-            <TextBlock Foreground="{DynamicResource SecondaryTextBrush}" Text="Compact IPTV browser with Xtream loading, group flag mapping, live guide previews, recents, recording, and reconnect-ready playback" />
-        </StackPanel>
+        <Grid Grid.Row="0" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
-        <StackPanel Grid.Row="1" Margin="0,0,0,10">
-            <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Playlist or Stream URL" />
-            <TextBox x:Name="StreamUrlTextBox"
-                     Height="32"
-                     Padding="10,6"
-                     HorizontalContentAlignment="Left"
-                     VerticalContentAlignment="Center"
-                     ToolTip="Paste an M3U playlist URL, a direct stream URL, or an Xtream get.php URL." />
-        </StackPanel>
+            <StackPanel Grid.Column="0">
+                <TextBlock FontSize="26" FontWeight="SemiBold" Text="Schmube" />
+                <TextBlock Foreground="{DynamicResource SecondaryTextBrush}" Text="Compact IPTV browser with Xtream loading, group flag mapping, live guide previews, recents, recording, and reconnect-ready playback" />
+            </StackPanel>
 
-        <StackPanel Grid.Row="2" Margin="0,0,0,10" Orientation="Horizontal">
-            <CheckBox x:Name="KeepOnTopCheckBox"
-                      Margin="0,0,14,0"
-                      VerticalAlignment="Center"
-                      Content="Keep player window on top"
-                      ToolTip="Keep the separate player window above other windows while a stream is open." />
-            <CheckBox x:Name="DarkModeCheckBox"
-                      VerticalAlignment="Center"
-                      Content="Dark mode"
-                      Click="DarkModeCheckBox_Click"
-                      ToolTip="Toggle the application theme." />
-        </StackPanel>
+            <Button x:Name="DarkModeButton"
+                    Grid.Column="1"
+                    Style="{StaticResource StateButtonStyle}"
+                    Width="78"
+                    Height="32"
+                    Margin="12,0,0,0"
+                    VerticalAlignment="Top"
+                    Content="Dark"
+                    Click="DarkModeButton_Click"
+                    ToolTip="Toggle the application theme." />
+        </Grid>
 
-        <DockPanel Grid.Row="3" Margin="0,0,0,10" LastChildFill="True">
+        <DockPanel Grid.Row="1" Margin="0,0,0,10" LastChildFill="True">
+            <WrapPanel DockPanel.Dock="Right" Margin="10,24,0,0" VerticalAlignment="Top">
+                <Button x:Name="LoadChannelsButton" Width="106" Height="32" Margin="0,0,8,0" Content="Load Channels" Click="LoadChannelsButton_Click" ToolTip="Fetch channels from the configured playlist or Xtream account." />
+                <Button x:Name="SaveSettingsButton" Width="72" Height="32" Content="Save" Click="SaveButton_Click" ToolTip="Save the current URL, favorites, recents, and window settings locally." />
+            </WrapPanel>
+
+            <StackPanel>
+                <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Playlist or Stream URL" />
+                <TextBox x:Name="StreamUrlTextBox"
+                         Height="32"
+                         Padding="10,6"
+                         HorizontalContentAlignment="Left"
+                         VerticalContentAlignment="Center"
+                         ToolTip="Paste an M3U playlist URL, a direct stream URL, or an Xtream get.php URL." />
+            </StackPanel>
+        </DockPanel>
+
+        <DockPanel Grid.Row="2" Margin="0,0,0,10" LastChildFill="True">
             <WrapPanel DockPanel.Dock="Left" VerticalAlignment="Center">
-                <StackPanel Width="170" Margin="0,0,10,0">
+                <StackPanel Width="150" Margin="0,0,10,0">
                     <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Search" />
                     <TextBox x:Name="ChannelSearchTextBox"
                              Height="32"
@@ -199,7 +221,7 @@
                              TextChanged="ChannelSearchTextBox_TextChanged" />
                 </StackPanel>
 
-                <StackPanel Width="170" Margin="0,0,10,0">
+                <StackPanel Width="150" Margin="0,0,10,0">
                     <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Group" />
                     <ComboBox x:Name="GroupFilterComboBox"
                               Style="{StaticResource MainGroupComboBoxStyle}"
@@ -213,51 +235,72 @@
                     </ComboBox>
                 </StackPanel>
 
-                <CheckBox x:Name="SearchAllGroupsCheckBox"
-                          Margin="0,26,12,0"
-                          VerticalAlignment="Top"
-                          Content="Search all groups"
-                          ToolTip="When search text is present, ignore the selected group and search across all loaded channels."
-                          Click="SearchAllGroupsCheckBox_Click" />
+                <StackPanel Margin="0,0,10,0">
+                    <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Browse" />
+                    <WrapPanel>
+                        <Button x:Name="SearchAllGroupsButton"
+                                Style="{StaticResource StateButtonStyle}"
+                                Width="96"
+                                Height="32"
+                                Margin="0,0,8,0"
+                                Content="All Groups"
+                                ToolTip="When search text is present, ignore the selected group and search across all loaded channels."
+                                Click="SearchAllGroupsButton_Click" />
 
-                <CheckBox x:Name="FavoritesOnlyCheckBox"
-                          Margin="0,26,12,0"
-                          VerticalAlignment="Top"
-                          Content="Favorites only"
-                          ToolTip="Show only channels marked as favorites."
-                          Click="FavoritesOnlyCheckBox_Click" />
+                        <Button x:Name="FavoritesOnlyButton"
+                                Style="{StaticResource StateButtonStyle}"
+                                Width="78"
+                                Height="32"
+                                Margin="0,0,8,0"
+                                Content="Favorites"
+                                ToolTip="Show only channels marked as favorites."
+                                Click="FavoritesOnlyButton_Click" />
 
-                <CheckBox x:Name="RecentOnlyCheckBox"
-                          Margin="0,26,12,0"
-                          VerticalAlignment="Top"
-                          Content="Recent only"
-                          ToolTip="Show only channels you played recently."
-                          Click="RecentOnlyCheckBox_Click" />
-            </WrapPanel>
+                        <Button x:Name="RecentOnlyButton"
+                                Style="{StaticResource StateButtonStyle}"
+                                Width="84"
+                                Height="32"
+                                Content="Recent"
+                                ToolTip="Show only channels you played recently."
+                                Click="RecentOnlyButton_Click" />
+                    </WrapPanel>
+                </StackPanel>
 
-            <WrapPanel DockPanel.Dock="Right" VerticalAlignment="Bottom">
-                <Button x:Name="LoadChannelsButton" Width="106" Height="32" Margin="0,0,8,0" Content="Load Channels" Click="LoadChannelsButton_Click" ToolTip="Fetch channels from the configured playlist or Xtream account." />
-                <Button x:Name="TvListingsButton" Width="92" Height="32" Margin="0,0,8,0" Content="TV Listings" Click="TvListingsButton_Click" ToolTip="Open a football match page, generate compatible playlist channels from its broadcaster listing, and load them as a temporary navigation list." />
-                <Button x:Name="ClearTempListButton" Width="92" Height="32" Margin="0,0,8,0" Content="Clear Temp" Click="ClearTempListButton_Click" ToolTip="Clear the active temporary channel list created from TV listings results." />
-                <Button x:Name="ExportM3uButton" Width="92" Height="32" Margin="0,0,8,0" Content="Export M3U" Click="ExportM3uButton_Click" ToolTip="Export all loaded channels, the selected group, the current visible list, or the active temporary list to an M3U file.">
-                    <Button.ContextMenu>
-                        <ContextMenu>
-                            <MenuItem x:Name="ExportAllM3uMenuItem" Header="Complete list" Click="ExportAllM3uMenuItem_Click" />
-                            <MenuItem x:Name="ExportSelectedGroupM3uMenuItem" Header="Selected group" Click="ExportSelectedGroupM3uMenuItem_Click" />
-                            <MenuItem x:Name="ExportVisibleM3uMenuItem" Header="Current visible list" Click="ExportVisibleM3uMenuItem_Click" />
-                            <MenuItem x:Name="ExportTemporaryM3uMenuItem" Header="Temporary list" Click="ExportTemporaryM3uMenuItem_Click" />
-                        </ContextMenu>
-                    </Button.ContextMenu>
-                </Button>
-                <Button x:Name="PlaySelectedButton" Width="102" Height="32" Margin="0,0,8,0" Content="Play Selected" Click="PlaySelectedButton_Click" ToolTip="Play the currently selected channel in the player window." />
-                <Button x:Name="PlayUrlButton" Width="86" Height="32" Margin="0,0,8,0" Content="Play URL" Click="PlayUrlButton_Click" ToolTip="Play the raw URL above directly when it is a single stream." />
-                <Button x:Name="OpenPlayerButton" Width="96" Height="32" Margin="0,0,8,0" Content="Open Player" Click="OpenPlayerButton_Click" ToolTip="Open the separate resizable player window without starting playback." />
-                <Button x:Name="StopPlaybackButton" Width="80" Height="32" Margin="0,0,8,0" Content="Stop" Click="StopButton_Click" ToolTip="Stop playback in the player window." />
-                <Button x:Name="SaveSettingsButton" Width="72" Height="32" Content="Save" Click="SaveButton_Click" ToolTip="Save the current URL, favorites, recents, and window settings locally." />
+                <StackPanel Margin="0,0,10,0">
+                    <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Tools" />
+                    <WrapPanel>
+                        <Button x:Name="TvListingsButton" Width="88" Height="32" Margin="0,0,8,0" Content="TV Listings" Click="TvListingsButton_Click" ToolTip="Open a football match page, generate compatible playlist channels from its broadcaster listing, and load them as a temporary navigation list." />
+                        <Button x:Name="ClearTempListButton" Width="88" Height="32" Margin="0,0,8,0" Content="Clear Temp" Click="ClearTempListButton_Click" ToolTip="Clear the active temporary channel list created from TV listings results." />
+                        <Button x:Name="ExportM3uButton" Width="90" Height="32" Margin="0,0,8,0" Content="Export M3U" Click="ExportM3uButton_Click" ToolTip="Export all loaded channels, the selected group, the current visible list, or the active temporary list to an M3U file.">
+                            <Button.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem x:Name="ExportAllM3uMenuItem" Header="Complete list" Click="ExportAllM3uMenuItem_Click" />
+                                    <MenuItem x:Name="ExportSelectedGroupM3uMenuItem" Header="Selected group" Click="ExportSelectedGroupM3uMenuItem_Click" />
+                                    <MenuItem x:Name="ExportVisibleM3uMenuItem" Header="Current visible list" Click="ExportVisibleM3uMenuItem_Click" />
+                                    <MenuItem x:Name="ExportTemporaryM3uMenuItem" Header="Temporary list" Click="ExportTemporaryM3uMenuItem_Click" />
+                                </ContextMenu>
+                            </Button.ContextMenu>
+                        </Button>
+                    </WrapPanel>
+                </StackPanel>
+
+                <StackPanel>
+                    <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Player" />
+                    <WrapPanel>
+                        <Button x:Name="PlayUrlButton" Width="78" Height="32" Margin="0,0,8,0" Content="Play URL" Click="PlayUrlButton_Click" ToolTip="Play the raw URL above directly when it is a single stream." />
+                        <Button x:Name="KeepOnTopButton"
+                                Style="{StaticResource StateButtonStyle}"
+                                Width="70"
+                                Height="32"
+                                Content="Top"
+                                Click="KeepOnTopButton_Click"
+                                ToolTip="Keep the separate player window above other windows while a stream is open." />
+                    </WrapPanel>
+                </StackPanel>
             </WrapPanel>
         </DockPanel>
 
-        <Grid Grid.Row="4">
+        <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="320" />
                 <ColumnDefinition Width="6" />
@@ -468,7 +511,7 @@
             </Border>
         </Grid>
 
-        <Border Grid.Row="5"
+        <Border Grid.Row="4"
                 Margin="0,10,0,0"
                 Background="{DynamicResource StatusSurfaceBrush}"
                 CornerRadius="8"

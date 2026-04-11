@@ -51,6 +51,11 @@ public partial class MainWindow : Window
     private string _temporaryListLabel = string.Empty;
     private XtreamConnectionInfo? _currentXtreamConnection;
     private PlayerWindow? _playerWindow;
+    private bool _keepPlayerOnTop;
+    private bool _useDarkMode;
+    private bool _searchAllGroups;
+    private bool _favoritesOnly;
+    private bool _recentOnly;
 
     public MainWindow()
     {
@@ -88,20 +93,18 @@ public partial class MainWindow : Window
     private void RegisterFocusHints()
     {
         RegisterFocusHint(StreamUrlTextBox, "Source URL for your playlist or direct stream. Paste it here or keep using the saved config value.");
-        RegisterFocusHint(KeepOnTopCheckBox, "Keep the separate player window above your other apps while you watch.");
+        RegisterFocusHint(DarkModeButton, "Toggle the application theme.");
+        RegisterFocusHint(KeepOnTopButton, "Keep the separate player window above your other apps while you watch.");
         RegisterFocusHint(ChannelSearchTextBox, "Filter the loaded channels by name, group, channel ID, or the live guide preview.");
         RegisterFocusHint(GroupFilterComboBox, "Limit the channel list to one normalized group after the playlist finishes loading.");
-        RegisterFocusHint(SearchAllGroupsCheckBox, "When search text is present, search across all groups instead of limiting results to the selected group.");
-        RegisterFocusHint(FavoritesOnlyCheckBox, "Show only channels you have marked as favorites.");
-        RegisterFocusHint(RecentOnlyCheckBox, "Show only channels you played recently.");
+        RegisterFocusHint(SearchAllGroupsButton, "When search text is present, search across all groups instead of limiting results to the selected group.");
+        RegisterFocusHint(FavoritesOnlyButton, "Show only channels you have marked as favorites.");
+        RegisterFocusHint(RecentOnlyButton, "Show only channels you played recently.");
         RegisterFocusHint(LoadChannelsButton, "Load or refresh the channel list from the configured source.");
         RegisterFocusHint(TvListingsButton, "Open a football match page, generate compatible playlist channels from its broadcaster listing, and build a temporary channel list from the current playlist.");
         RegisterFocusHint(ClearTempListButton, "Clear the active temporary channel list created from TV listings results and return to normal browsing.");
         RegisterFocusHint(ExportM3uButton, "Export loaded channels as an M3U playlist. Use the menu for the complete list, selected group, current visible list, or temporary list.");
-        RegisterFocusHint(PlaySelectedButton, "Start playback for the channel currently selected in the list.");
         RegisterFocusHint(PlayUrlButton, "Play the raw URL directly when it points to a single stream rather than a playlist account.");
-        RegisterFocusHint(OpenPlayerButton, "Open the separate resizable player window without changing the current stream.");
-        RegisterFocusHint(StopPlaybackButton, "Stop playback in the player window.");
         RegisterFocusHint(SaveSettingsButton, "Persist the current URL, favorites, recents, and playback window setting locally.");
         RegisterFocusHint(ChannelsListView, "Browse channels here. Single-click selects a channel and double-click starts playback.");
         RegisterFocusHint(ToggleFavoriteButton, "Add or remove the selected channel from your favorites list.");
@@ -143,11 +146,13 @@ public partial class MainWindow : Window
         StreamUrlTextBox.Text = !string.IsNullOrWhiteSpace(_appConfig.SubscriptionUrl)
             ? _appConfig.SubscriptionUrl
             : settings.StreamUrl;
-        KeepOnTopCheckBox.IsChecked = settings.KeepPlayerOnTop;
-        DarkModeCheckBox.IsChecked = settings.UseDarkMode;
-        ThemeService.ApplyTheme(settings.UseDarkMode);
-        FavoritesOnlyCheckBox.IsChecked = false;
-        RecentOnlyCheckBox.IsChecked = false;
+        _keepPlayerOnTop = settings.KeepPlayerOnTop;
+        _useDarkMode = settings.UseDarkMode;
+        _searchAllGroups = false;
+        _favoritesOnly = false;
+        _recentOnly = false;
+        ThemeService.ApplyTheme(_useDarkMode);
+        UpdateToggleButtonStates();
         UpdateTemporaryListUi();
         UpdateExportM3uUi();
     }
@@ -168,8 +173,8 @@ public partial class MainWindow : Window
         return new StreamSettings
         {
             StreamUrl = StreamUrlTextBox.Text.Trim(),
-            KeepPlayerOnTop = KeepOnTopCheckBox.IsChecked == true,
-            UseDarkMode = DarkModeCheckBox.IsChecked == true,
+            KeepPlayerOnTop = _keepPlayerOnTop,
+            UseDarkMode = _useDarkMode,
             FavoriteChannelKeys = _favoriteChannelKeys.OrderBy(key => key, StringComparer.OrdinalIgnoreCase).ToList(),
             RecentChannelKeys = _recentChannelKeys.ToList(),
             LastChannelKey = _lastPlayedChannelKey
@@ -230,7 +235,7 @@ public partial class MainWindow : Window
             _playerWindow.Show();
         }
 
-        _playerWindow.SetAlwaysOnTop(KeepOnTopCheckBox.IsChecked == true);
+        _playerWindow.SetAlwaysOnTop(_keepPlayerOnTop);
 
         if (!_playerWindow.IsVisible)
         {
@@ -713,16 +718,14 @@ public partial class MainWindow : Window
         var preferredChannelKey = selectFirstChannel ? _pendingSelectionChannelKey : string.Empty;
         var searchText = ChannelSearchTextBox.Text.Trim();
         var selectedGroup = SelectedGroupOption?.Value;
-        var searchAllGroups = SearchAllGroupsCheckBox.IsChecked == true && !string.IsNullOrWhiteSpace(searchText);
-        var favoritesOnly = FavoritesOnlyCheckBox.IsChecked == true;
-        var recentOnly = RecentOnlyCheckBox.IsChecked == true;
+        var searchAllGroups = _searchAllGroups && !string.IsNullOrWhiteSpace(searchText);
 
         var filteredChannels = _allChannels
             .Where(channel => !HasTemporaryChannelList || _temporaryChannelOrder.ContainsKey(channel.StreamUri.ToString()))
             .Where(channel => MatchesSearch(channel, searchText))
             .Where(channel => searchAllGroups || MatchesGroup(channel, selectedGroup))
-            .Where(channel => !favoritesOnly || channel.IsFavorite)
-            .Where(channel => !recentOnly || channel.RecentRank >= 0);
+            .Where(channel => !_favoritesOnly || channel.IsFavorite)
+            .Where(channel => !_recentOnly || channel.RecentRank >= 0);
 
         var orderedChannels = HasTemporaryChannelList
             ? filteredChannels
@@ -730,7 +733,7 @@ public partial class MainWindow : Window
                 .ThenBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase)
             : filteredChannels
                 .OrderByDescending(channel => channel.IsFavorite)
-                .ThenBy(channel => recentOnly ? channel.RecentRank : int.MaxValue)
+                .ThenBy(channel => _recentOnly ? channel.RecentRank : int.MaxValue)
                 .ThenBy(channel => channel.GroupDisplayTitle, StringComparer.CurrentCultureIgnoreCase)
                 .ThenBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase);
 
@@ -805,12 +808,12 @@ public partial class MainWindow : Window
 
         var summary = $"Showing {_visibleChannels.Count} of {_allChannels.Count} channels.";
 
-        if (FavoritesOnlyCheckBox.IsChecked == true)
+        if (_favoritesOnly)
         {
             summary += " Favorites only.";
         }
 
-        if (RecentOnlyCheckBox.IsChecked == true)
+        if (_recentOnly)
         {
             summary += " Recent only.";
         }
@@ -818,13 +821,13 @@ public partial class MainWindow : Window
         if (SelectedGroupOption is { Value: not "" } selectedGroupOption
             && !string.Equals(selectedGroupOption.Value, AllGroupsLabel, StringComparison.Ordinal))
         {
-            var searchAllGroups = SearchAllGroupsCheckBox.IsChecked == true && !string.IsNullOrWhiteSpace(ChannelSearchTextBox.Text.Trim());
+            var searchAllGroups = _searchAllGroups && !string.IsNullOrWhiteSpace(ChannelSearchTextBox.Text.Trim());
             summary += searchAllGroups
                 ? $" Group: {selectedGroupOption.Label} (ignored while searching)."
                 : $" Group: {selectedGroupOption.Label}.";
         }
 
-        if (SearchAllGroupsCheckBox.IsChecked == true && !string.IsNullOrWhiteSpace(ChannelSearchTextBox.Text.Trim()))
+        if (_searchAllGroups && !string.IsNullOrWhiteSpace(ChannelSearchTextBox.Text.Trim()))
         {
             summary += " Searching across all groups.";
         }
@@ -854,8 +857,9 @@ public partial class MainWindow : Window
         _temporaryListLabel = string.IsNullOrWhiteSpace(selection.Label) ? "TV listings" : selection.Label.Trim();
         GroupFilterComboBox.SelectedIndex = 0;
         ChannelSearchTextBox.Text = string.Empty;
-        FavoritesOnlyCheckBox.IsChecked = false;
-        RecentOnlyCheckBox.IsChecked = false;
+        _favoritesOnly = false;
+        _recentOnly = false;
+        UpdateToggleButtonStates();
         UpdateTemporaryListUi();
         ApplyChannelFilter(selectFirstChannel: true);
     }
@@ -1025,12 +1029,6 @@ public partial class MainWindow : Window
         ApplyChannelFilter(selectFirstChannel: false);
     }
 
-    private void OpenPlayerButton_Click(object sender, RoutedEventArgs e)
-    {
-        EnsurePlayerWindow(true);
-        StatusTextBlock.Text = "Player window opened.";
-    }
-
     private void TvListingsButton_Click(object sender, RoutedEventArgs e)
     {
         var listingsWindow = new ListingsWindow(_allChannels)
@@ -1150,11 +1148,6 @@ public partial class MainWindow : Window
         ClearTemporaryChannelList();
     }
 
-    private async void PlaySelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        await PlaySelectedChannelAsync();
-    }
-
     private async void PlayUrlButton_Click(object sender, RoutedEventArgs e)
     {
         if (!TryBuildDirectRequest(out var request) || request is null)
@@ -1165,24 +1158,28 @@ public partial class MainWindow : Window
         await PlayRequestAsync(request, $"Playing {request.DisplayName}.");
     }
 
-    private void StopButton_Click(object sender, RoutedEventArgs e)
-    {
-        _playerWindow?.Stop();
-        StatusTextBlock.Text = "Playback stopped.";
-    }
-
     private void SaveButton_Click(object sender, RoutedEventArgs e)
     {
         _settingsStore.Save(CollectSettingsFromUi());
         StatusTextBlock.Text = "Settings saved.";
     }
 
-    private void DarkModeCheckBox_Click(object sender, RoutedEventArgs e)
+    private void KeepOnTopButton_Click(object sender, RoutedEventArgs e)
     {
-        var useDarkMode = DarkModeCheckBox.IsChecked == true;
-        ThemeService.ApplyTheme(useDarkMode);
+        _keepPlayerOnTop = !_keepPlayerOnTop;
+        _playerWindow?.SetAlwaysOnTop(_keepPlayerOnTop);
         _settingsStore.Save(CollectSettingsFromUi());
-        StatusTextBlock.Text = useDarkMode ? "Dark mode enabled." : "Dark mode disabled.";
+        UpdateToggleButtonStates();
+        StatusTextBlock.Text = _keepPlayerOnTop ? "Player window stays on top." : "Player window on-top disabled.";
+    }
+
+    private void DarkModeButton_Click(object sender, RoutedEventArgs e)
+    {
+        _useDarkMode = !_useDarkMode;
+        ThemeService.ApplyTheme(_useDarkMode);
+        _settingsStore.Save(CollectSettingsFromUi());
+        UpdateToggleButtonStates();
+        StatusTextBlock.Text = _useDarkMode ? "Dark mode enabled." : "Dark mode disabled.";
     }
 
     private async void ChannelsListView_MouseDoubleClick(object sender, MouseButtonEventArgs e)
@@ -1210,22 +1207,37 @@ public partial class MainWindow : Window
         ApplyChannelFilter(selectFirstChannel: false);
     }
 
-    private void FavoritesOnlyCheckBox_Click(object sender, RoutedEventArgs e)
+    private void FavoritesOnlyButton_Click(object sender, RoutedEventArgs e)
     {
+        _favoritesOnly = !_favoritesOnly;
+        UpdateToggleButtonStates();
         _searchDebounceTimer.Stop();
         ApplyChannelFilter(selectFirstChannel: false);
     }
 
-    private void SearchAllGroupsCheckBox_Click(object sender, RoutedEventArgs e)
+    private void SearchAllGroupsButton_Click(object sender, RoutedEventArgs e)
     {
+        _searchAllGroups = !_searchAllGroups;
+        UpdateToggleButtonStates();
         _searchDebounceTimer.Stop();
         ApplyChannelFilter(selectFirstChannel: false);
     }
 
-    private void RecentOnlyCheckBox_Click(object sender, RoutedEventArgs e)
+    private void RecentOnlyButton_Click(object sender, RoutedEventArgs e)
     {
+        _recentOnly = !_recentOnly;
+        UpdateToggleButtonStates();
         _searchDebounceTimer.Stop();
         ApplyChannelFilter(selectFirstChannel: false);
+    }
+
+    private void UpdateToggleButtonStates()
+    {
+        KeepOnTopButton.Tag = _keepPlayerOnTop ? "Active" : null;
+        DarkModeButton.Tag = _useDarkMode ? "Active" : null;
+        SearchAllGroupsButton.Tag = _searchAllGroups ? "Active" : null;
+        FavoritesOnlyButton.Tag = _favoritesOnly ? "Active" : null;
+        RecentOnlyButton.Tag = _recentOnly ? "Active" : null;
     }
 
     protected override void OnClosed(EventArgs e)
