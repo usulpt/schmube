@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -69,9 +70,15 @@ public partial class MainWindow : Window
     private bool _favoritesOnly;
     private bool _recentOnly;
     private bool _suppressFilterRefresh;
+    private int _recordingDefaultDurationMinutes = 60;
+    private int _recordingStartPaddingMinutes;
+    private int _recordingEndPaddingMinutes;
+    private string _recordingFileNameFormat = "{timestamp}_{channel}";
     private ChannelColumnPreset _columnPreset = ChannelColumnPreset.Standard;
     private string _savedGroupFilter = string.Empty;
     private readonly Dictionary<string, string> _customChannelGroups = new(StringComparer.OrdinalIgnoreCase);
+    private List<RecordingScheduleEntry> _recordingSchedules = [];
+    private List<RecordingHistoryEntry> _recordingHistory = [];
 
     public MainWindow()
     {
@@ -129,6 +136,10 @@ public partial class MainWindow : Window
         RegisterFocusHint(FavoritesOnlyButton, "Show only channels you have marked as favorites.");
         RegisterFocusHint(RecentOnlyButton, "Show only channels you played recently.");
         RegisterFocusHint(ClearFiltersButton, "Clear search, group, favorites, recents, and temporary list filters.");
+        RegisterFocusHint(RecordingDefaultDurationTextBox, "Default duration for manually scheduled player recordings.");
+        RegisterFocusHint(RecordingStartPaddingTextBox, "Minutes to start before a program guide recording.");
+        RegisterFocusHint(RecordingEndPaddingTextBox, "Minutes to keep recording after a program guide entry ends.");
+        RegisterFocusHint(RecordingFileNameFormatTextBox, "Filename format for recordings. Use {timestamp}, {channel}, and {program}.");
         RegisterFocusHint(ColumnsButton, "Switch the channel list between compact, standard, and detail column layouts.");
         RegisterFocusHint(LoadChannelsButton, "Load or refresh the channel list from the configured source.");
         RegisterFocusHint(TvListingsButton, "Open a football match page, generate compatible playlist channels from its broadcaster listing, and build a temporary channel list from the current playlist.");
@@ -190,7 +201,24 @@ public partial class MainWindow : Window
         _searchAllGroups = settings.SearchAllGroups;
         _favoritesOnly = settings.FavoritesOnly;
         _recentOnly = settings.RecentOnly;
+        _recordingDefaultDurationMinutes = Math.Clamp(settings.RecordingDefaultDurationMinutes, 1, 1440);
+        _recordingStartPaddingMinutes = Math.Clamp(settings.RecordingStartPaddingMinutes, 0, 240);
+        _recordingEndPaddingMinutes = Math.Clamp(settings.RecordingEndPaddingMinutes, 0, 240);
+        _recordingFileNameFormat = string.IsNullOrWhiteSpace(settings.RecordingFileNameFormat)
+            ? "{timestamp}_{channel}"
+            : settings.RecordingFileNameFormat.Trim();
+        _recordingSchedules = settings.RecordingSchedules
+            .Where(schedule => schedule.EndLocal > DateTime.Now)
+            .ToList();
+        _recordingHistory = settings.RecordingHistory
+            .OrderByDescending(entry => entry.StartedLocal)
+            .Take(50)
+            .ToList();
         ChannelSearchTextBox.Text = settings.SearchText ?? string.Empty;
+        RecordingDefaultDurationTextBox.Text = _recordingDefaultDurationMinutes.ToString(CultureInfo.CurrentCulture);
+        RecordingStartPaddingTextBox.Text = _recordingStartPaddingMinutes.ToString(CultureInfo.CurrentCulture);
+        RecordingEndPaddingTextBox.Text = _recordingEndPaddingMinutes.ToString(CultureInfo.CurrentCulture);
+        RecordingFileNameFormatTextBox.Text = _recordingFileNameFormat;
         _columnPreset = ParseColumnPreset(settings.ColumnPreset);
         ThemeService.ApplyTheme(_useDarkMode);
         UpdateToggleButtonStates();
@@ -200,6 +228,12 @@ public partial class MainWindow : Window
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        if (_recordingSchedules.Count > 0)
+        {
+            EnsurePlayerWindow(false);
+            StatusTextBlock.Text = $"{_recordingSchedules.Count} scheduled recording(s) loaded.";
+        }
+
         if (_autoLoadAttempted || !_appConfig.AutoLoadOnStartup || string.IsNullOrWhiteSpace(StreamUrlTextBox.Text))
         {
             return;
@@ -211,6 +245,7 @@ public partial class MainWindow : Window
 
     private StreamSettings CollectSettingsFromUi()
     {
+        RefreshRecordingSettingsFromUi();
         return new StreamSettings
         {
             StreamUrl = StreamUrlTextBox.Text.Trim(),
@@ -225,8 +260,33 @@ public partial class MainWindow : Window
             FavoritesOnly = _favoritesOnly,
             RecentOnly = _recentOnly,
             ColumnPreset = _columnPreset.ToString(),
-            CustomChannelGroups = _customChannelGroups.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase)
+            CustomChannelGroups = _customChannelGroups.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase),
+            RecordingDefaultDurationMinutes = ReadPositiveIntSetting(RecordingDefaultDurationTextBox, _recordingDefaultDurationMinutes, 1, 1440),
+            RecordingStartPaddingMinutes = ReadPositiveIntSetting(RecordingStartPaddingTextBox, _recordingStartPaddingMinutes, 0, 240),
+            RecordingEndPaddingMinutes = ReadPositiveIntSetting(RecordingEndPaddingTextBox, _recordingEndPaddingMinutes, 0, 240),
+            RecordingFileNameFormat = string.IsNullOrWhiteSpace(RecordingFileNameFormatTextBox.Text)
+                ? "{timestamp}_{channel}"
+                : RecordingFileNameFormatTextBox.Text.Trim(),
+            RecordingSchedules = _recordingSchedules.ToList(),
+            RecordingHistory = _recordingHistory.ToList()
         };
+    }
+
+    private void RefreshRecordingSettingsFromUi()
+    {
+        _recordingDefaultDurationMinutes = ReadPositiveIntSetting(RecordingDefaultDurationTextBox, _recordingDefaultDurationMinutes, 1, 1440);
+        _recordingStartPaddingMinutes = ReadPositiveIntSetting(RecordingStartPaddingTextBox, _recordingStartPaddingMinutes, 0, 240);
+        _recordingEndPaddingMinutes = ReadPositiveIntSetting(RecordingEndPaddingTextBox, _recordingEndPaddingMinutes, 0, 240);
+        _recordingFileNameFormat = string.IsNullOrWhiteSpace(RecordingFileNameFormatTextBox.Text)
+            ? "{timestamp}_{channel}"
+            : RecordingFileNameFormatTextBox.Text.Trim();
+    }
+
+    private static int ReadPositiveIntSetting(TextBox textBox, int fallback, int min, int max)
+    {
+        return int.TryParse(textBox.Text.Trim(), NumberStyles.Integer, CultureInfo.CurrentCulture, out var value)
+            ? Math.Clamp(value, min, max)
+            : fallback;
     }
 
     private bool TryGetConfiguredUri(out Uri? uri)
@@ -272,6 +332,7 @@ public partial class MainWindow : Window
 
     private PlayerWindow EnsurePlayerWindow(bool focusWindow)
     {
+        RefreshRecordingSettingsFromUi();
         if (_playerWindow is null || !_playerWindow.IsLoaded)
         {
             _playerWindow = new PlayerWindow
@@ -280,11 +341,15 @@ public partial class MainWindow : Window
             };
             _playerWindow.ChannelStepRequested += PlayerWindow_ChannelStepRequested;
             _playerWindow.PlaybackStopped += PlayerWindow_PlaybackStopped;
+            _playerWindow.RecordingStateChanged += PlayerWindow_RecordingStateChanged;
             _playerWindow.Closed += PlayerWindow_Closed;
+            _playerWindow.ConfigureRecordingDefaults(_recordingDefaultDurationMinutes, _recordingFileNameFormat);
+            _playerWindow.LoadRecordingState(_recordingSchedules, _recordingHistory);
             _playerWindow.Show();
         }
 
         _playerWindow.SetAlwaysOnTop(_keepPlayerOnTop);
+        _playerWindow.ConfigureRecordingDefaults(_recordingDefaultDurationMinutes, _recordingFileNameFormat);
 
         if (!_playerWindow.IsVisible)
         {
@@ -303,8 +368,10 @@ public partial class MainWindow : Window
     {
         if (sender is PlayerWindow playerWindow)
         {
+            PlayerWindow_RecordingStateChanged(playerWindow, EventArgs.Empty);
             playerWindow.ChannelStepRequested -= PlayerWindow_ChannelStepRequested;
             playerWindow.PlaybackStopped -= PlayerWindow_PlaybackStopped;
+            playerWindow.RecordingStateChanged -= PlayerWindow_RecordingStateChanged;
         }
 
         if (ReferenceEquals(_playerWindow, sender))
@@ -323,6 +390,18 @@ public partial class MainWindow : Window
     {
         ClearNowPlaying();
         StatusTextBlock.Text = "Playback stopped.";
+    }
+
+    private void PlayerWindow_RecordingStateChanged(object? sender, EventArgs e)
+    {
+        if (sender is not PlayerWindow playerWindow)
+        {
+            return;
+        }
+
+        _recordingSchedules = playerWindow.GetRecordingSchedulesSnapshot().ToList();
+        _recordingHistory = playerWindow.GetRecordingHistorySnapshot().ToList();
+        _settingsStore.Save(CollectSettingsFromUi());
     }
 
     private async Task StepVisibleChannelAsync(int delta)
@@ -706,6 +785,56 @@ public partial class MainWindow : Window
             : $"{entries.Count} upcoming programs.";
     }
 
+    private void RecordProgramGuideEntryButton_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not ProgramGuideEntry entry)
+        {
+            StatusTextBlock.Text = "Choose a program guide entry first.";
+            return;
+        }
+
+        var selectedChannel = SelectedChannel;
+        if (selectedChannel is null)
+        {
+            StatusTextBlock.Text = "Select a channel before scheduling a program recording.";
+            return;
+        }
+
+        RefreshRecordingSettingsFromUi();
+        var startAt = entry.StartLocal.AddMinutes(-_recordingStartPaddingMinutes);
+        var endAt = entry.EndLocal.AddMinutes(_recordingEndPaddingMinutes);
+        if (endAt <= DateTime.Now)
+        {
+            StatusTextBlock.Text = "That program has already ended.";
+            return;
+        }
+
+        if (startAt < DateTime.Now)
+        {
+            startAt = DateTime.Now;
+        }
+
+        try
+        {
+            var request = BuildPlaybackRequest(
+                selectedChannel.StreamUri,
+                selectedChannel.Name,
+                allowReconnect: true,
+                selectedChannel.LogoSource,
+                selectedChannel.GroupFlag);
+            var playerWindow = EnsurePlayerWindow(false);
+            playerWindow.ScheduleRecording(request, startAt, endAt, entry.Title);
+            _recordingSchedules = playerWindow.GetRecordingSchedulesSnapshot().ToList();
+            _recordingHistory = playerWindow.GetRecordingHistorySnapshot().ToList();
+            _settingsStore.Save(CollectSettingsFromUi());
+            StatusTextBlock.Text = $"Scheduled {entry.Title} on {selectedChannel.Name} at {startAt:g}.";
+        }
+        catch (Exception ex)
+        {
+            StatusTextBlock.Text = $"Could not schedule recording: {ex.Message}";
+        }
+    }
+
     private void ApplyGuidePreview(PlaylistChannel channel, IReadOnlyList<ProgramGuideEntry> entries)
     {
         if (entries.Count == 0)
@@ -821,11 +950,13 @@ public partial class MainWindow : Window
             ? filteredChannels
                 .OrderBy(channel => _temporaryChannelOrder[channel.StreamUri.ToString()])
                 .ThenBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase)
+            : _recentOnly || selectedGroupIsRecent
+                ? filteredChannels
+                    .OrderBy(channel => channel.RecentRank)
+                    .ThenBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase)
             : filteredChannels
-                .OrderByDescending(channel => channel.IsFavorite)
-                .ThenBy(channel => _recentOnly || selectedGroupIsRecent ? channel.RecentRank : int.MaxValue)
-                .ThenBy(channel => channel.GroupDisplayTitle, StringComparer.CurrentCultureIgnoreCase)
-                .ThenBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase);
+                .OrderBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(channel => channel.GroupDisplayTitle, StringComparer.CurrentCultureIgnoreCase);
 
         _visibleChannels.Clear();
         foreach (var channel in orderedChannels)
@@ -1215,6 +1346,7 @@ public partial class MainWindow : Window
             "NowTitle" => channel.NowTitle,
             "NextTitle" => channel.NextTitle,
             "GroupDisplayTitle" => channel.GroupDisplayTitle,
+            "GroupTitle" => channel.GroupTitle,
             _ => string.Empty
         };
     }
@@ -1401,13 +1533,13 @@ public partial class MainWindow : Window
         switch (preset)
         {
             case ChannelColumnPreset.Compact:
-                SetChannelColumnWidths(favorite: 34, recent: 0, flag: 72, logo: 0, channel: 260, now: 220, next: 0, group: 130);
+                SetChannelColumnWidths(favorite: 34, recent: 0, flag: 72, logo: 0, channel: 260, now: 220, next: 0, group: 130, sourceGroup: 0);
                 break;
             case ChannelColumnPreset.Detail:
-                SetChannelColumnWidths(favorite: 38, recent: 52, flag: 96, logo: 64, channel: 260, now: 220, next: 220, group: 190);
+                SetChannelColumnWidths(favorite: 38, recent: 52, flag: 96, logo: 64, channel: 250, now: 210, next: 210, group: 170, sourceGroup: 210);
                 break;
             default:
-                SetChannelColumnWidths(favorite: 38, recent: 52, flag: 96, logo: 64, channel: 220, now: 190, next: 190, group: 170);
+                SetChannelColumnWidths(favorite: 38, recent: 52, flag: 96, logo: 64, channel: 210, now: 180, next: 180, group: 160, sourceGroup: 190);
                 break;
         }
 
@@ -1421,7 +1553,7 @@ public partial class MainWindow : Window
             : ChannelColumnPreset.Standard;
     }
 
-    private void SetChannelColumnWidths(double favorite, double recent, double flag, double logo, double channel, double now, double next, double group)
+    private void SetChannelColumnWidths(double favorite, double recent, double flag, double logo, double channel, double now, double next, double group, double sourceGroup)
     {
         FavoriteColumn.Width = favorite;
         RecentColumn.Width = recent;
@@ -1431,6 +1563,7 @@ public partial class MainWindow : Window
         NowColumn.Width = now;
         NextColumn.Width = next;
         GroupColumn.Width = group;
+        SourceGroupColumn.Width = sourceGroup;
     }
 
     private void UpdateColumnPresetUi()
@@ -1579,6 +1712,8 @@ public partial class MainWindow : Window
 
     private void SaveButton_Click(object sender, RoutedEventArgs e)
     {
+        RefreshRecordingSettingsFromUi();
+        _playerWindow?.ConfigureRecordingDefaults(_recordingDefaultDurationMinutes, _recordingFileNameFormat);
         _settingsStore.Save(CollectSettingsFromUi());
         StatusTextBlock.Text = "Settings saved.";
     }

@@ -1,6 +1,7 @@
 <Window x:Class="Schmube.PlayerWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:primitives="clr-namespace:System.Windows.Controls.Primitives;assembly=PresentationFramework"
         xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
         Title="Schmube Player"
         Width="1080"
@@ -35,9 +36,31 @@
             <Setter Property="Background" Value="{DynamicResource SelectionBrush}" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
+        <Style x:Key="PlayerScheduleTextBoxStyle" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+            <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="SelectionBrush" Value="{DynamicResource SelectionBrush}" />
+            <Setter Property="SelectionTextBrush" Value="{DynamicResource SelectionTextBrush}" />
+            <Setter Property="Padding" Value="6,3" />
+        </Style>
+        <Style x:Key="PlayerScheduleDatePickerStyle" TargetType="DatePicker">
+            <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+        </Style>
+        <Style TargetType="{x:Type primitives:DatePickerTextBox}">
+            <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource PrimaryTextBrush}" />
+        </Style>
     </Window.Resources>
     <Grid Background="{DynamicResource PlayerBackgroundBrush}">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
@@ -158,19 +181,150 @@
                         Width="76"
                         Margin="0,0,6,0"
                         Content="Record"
-                        Click="ToggleRecordingButton_Click" />
+                        Click="ToggleRecordingButton_Click"
+                        ToolTip="Start or stop recording the active stream." />
                 <Button x:Name="OpenRecordingsButton"
                         Width="76"
                         Content="Folder"
-                        Click="OpenRecordingsButton_Click" />
+                        Click="OpenRecordingsButton_Click"
+                        ToolTip="Open the recordings folder." />
             </StackPanel>
         </Grid>
 
+        <StackPanel x:Name="RecordingSchedulePanel"
+                    Grid.Row="1"
+                    Background="{DynamicResource PlayerChromeBrush}"
+                    Margin="0,1,0,0">
+            <WrapPanel MinHeight="42"
+                       VerticalAlignment="Center"
+                       ItemHeight="30">
+                <TextBlock Margin="12,0,8,0"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource InverseMutedTextBrush}"
+                           FontWeight="SemiBold"
+                           Text="Schedule" />
+                <TextBlock Margin="0,0,4,0"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource InverseMutedTextBrush}"
+                           Text="Date" />
+                <DatePicker x:Name="RecordingScheduleDatePicker"
+                            Style="{StaticResource PlayerScheduleDatePickerStyle}"
+                            Width="122"
+                            Margin="0,0,8,0"
+                            VerticalAlignment="Center" />
+                <TextBlock Margin="0,0,4,0"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource InverseMutedTextBrush}"
+                           Text="Time" />
+                <TextBox x:Name="RecordingScheduleTimeTextBox"
+                         Style="{StaticResource PlayerScheduleTextBoxStyle}"
+                         Width="58"
+                         Margin="0,0,8,0"
+                         VerticalAlignment="Center"
+                         ToolTip="Start time, for example 21:30." />
+                <TextBlock Margin="0,0,4,0"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource InverseMutedTextBrush}"
+                           Text="Minutes" />
+                <TextBox x:Name="RecordingScheduleDurationTextBox"
+                         Style="{StaticResource PlayerScheduleTextBoxStyle}"
+                         Width="54"
+                         Margin="0,0,8,0"
+                         VerticalAlignment="Center"
+                         ToolTip="Recording duration in minutes." />
+                <Button x:Name="ScheduleRecordingButton"
+                        Width="82"
+                        Margin="0,0,6,0"
+                        Content="Schedule"
+                        Click="ScheduleRecordingButton_Click"
+                        ToolTip="Schedule recording for the current channel." />
+                <Button x:Name="CancelRecordingScheduleButton"
+                        Width="104"
+                        Margin="0,0,6,0"
+                        Content="Cancel Pick"
+                        Click="CancelRecordingScheduleButton_Click"
+                        ToolTip="Cancel the selected scheduled recording, or the next one if none is selected." />
+                <Button x:Name="ToggleRecordingHistoryButton"
+                        Width="78"
+                        Margin="0,0,10,0"
+                        Content="History"
+                        Click="ToggleRecordingHistoryButton_Click"
+                        ToolTip="Show scheduled and completed recordings." />
+                <TextBlock x:Name="RecordingScheduleText"
+                           MinWidth="220"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource AccentTextBrush}"
+                           TextTrimming="CharacterEllipsis"
+                           Text="No recording scheduled." />
+            </WrapPanel>
+
+            <Grid x:Name="RecordingHistoryPanel"
+                  Visibility="Collapsed"
+                  MinHeight="126"
+                  MaxHeight="180"
+                  Margin="12,0,12,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="12" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Column="0"
+                           Margin="0,0,0,4"
+                           Foreground="{DynamicResource InverseMutedTextBrush}"
+                           FontWeight="SemiBold"
+                           Text="Scheduled" />
+                <ListBox x:Name="RecordingSchedulesListBox"
+                         Grid.Column="0"
+                         Grid.Row="1"
+                         MinHeight="76"
+                         Background="{DynamicResource InputBackgroundBrush}"
+                         Foreground="{DynamicResource PrimaryTextBrush}"
+                         BorderBrush="{DynamicResource BorderBrush}"
+                         DisplayMemberPath="Summary" />
+
+                <TextBlock Grid.Column="2"
+                           Margin="0,0,0,4"
+                           Foreground="{DynamicResource InverseMutedTextBrush}"
+                           FontWeight="SemiBold"
+                           Text="Recent Recordings" />
+                <ListBox x:Name="RecordingHistoryListBox"
+                         Grid.Column="2"
+                         Grid.Row="1"
+                         MinHeight="76"
+                         Background="{DynamicResource InputBackgroundBrush}"
+                         Foreground="{DynamicResource PrimaryTextBrush}"
+                         BorderBrush="{DynamicResource BorderBrush}"
+                         DisplayMemberPath="Summary" />
+
+                <WrapPanel Grid.Column="2"
+                           Grid.Row="2"
+                           Margin="0,6,0,0">
+                    <Button Width="64"
+                            Margin="0,0,6,0"
+                            Content="Open"
+                            Click="OpenRecordingHistoryItemButton_Click" />
+                    <Button Width="64"
+                            Margin="0,0,6,0"
+                            Content="Play"
+                            Click="PlayRecordingHistoryItemButton_Click" />
+                    <Button Width="64"
+                            Content="Delete"
+                            Click="DeleteRecordingHistoryItemButton_Click" />
+                </WrapPanel>
+            </Grid>
+        </StackPanel>
+
         <vlc:VideoView x:Name="VideoSurface"
-                       Grid.Row="1"
+                       Grid.Row="2"
                        MouseLeftButtonDown="VideoSurface_MouseLeftButtonDown" />
 
-        <Border x:Name="PlayerStatusBar" Grid.Row="2" Background="{DynamicResource PlayerChromeBrush}" Padding="12,8">
+        <Border x:Name="PlayerStatusBar" Grid.Row="3" Background="{DynamicResource PlayerChromeBrush}" Padding="12,8">
             <TextBlock x:Name="StatusText"
                        Foreground="{DynamicResource InverseMutedTextBrush}"
                        Text="Ready." />

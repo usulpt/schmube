@@ -75,7 +75,33 @@ public sealed class GroupFlagStore
         ["GREECE"] = "GR",
         ["TR"] = "TR",
         ["TURKEY"] = "TR",
-        ["ARGENTINA"] = "ARG",
+        ["DZ"] = "DZ",
+        ["ALGERIA"] = "DZ",
+        ["BAHRAIN"] = "BH",
+        ["EG"] = "EG",
+        ["EGYPT"] = "EG",
+        ["AE"] = "AE",
+        ["UAE"] = "AE",
+        ["EMIRATES"] = "AE",
+        ["UNITEDARABEMIRATES"] = "AE",
+        ["IRAQ"] = "IQ",
+        ["JORDAN"] = "JO",
+        ["KUWAIT"] = "KW",
+        ["LEBANON"] = "LB",
+        ["LIBYA"] = "LY",
+        ["MOROCCO"] = "MA",
+        ["OMAN"] = "OM",
+        ["QATAR"] = "QA",
+        ["PALESTINE"] = "PS",
+        ["SY"] = "SY",
+        ["SYRIA"] = "SY",
+        ["YE"] = "YE",
+        ["YEMEN"] = "YE",
+        ["SD"] = "SD",
+        ["SUDAN"] = "SD",
+        ["TN"] = "TN",
+        ["TUNISIA"] = "TN",
+        ["ALGERIE"] = "DZ",
         ["AL"] = "AL",
         ["ALBANIA"] = "AL",
         ["AT"] = "AT",
@@ -454,6 +480,11 @@ public sealed class GroupFlagStore
             return false;
         }
 
+        if (IsArgentinaAlias(normalized))
+        {
+            return false;
+        }
+
         if (!_countryAliases.Value.TryGetValue(normalized, out var resolvedCountryCode) || string.IsNullOrWhiteSpace(resolvedCountryCode))
         {
             return false;
@@ -591,6 +622,13 @@ public sealed class GroupFlagStore
             || trimmedTitle.StartsWith("AR -", StringComparison.CurrentCultureIgnoreCase)
             || trimmedTitle.StartsWith("AR –", StringComparison.CurrentCultureIgnoreCase)
             || trimmedTitle.StartsWith("AR —", StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private static bool IsArgentinaAlias(string normalizedAlias)
+    {
+        return string.Equals(normalizedAlias, "AR", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedAlias, "ARG", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedAlias, "ARGENTINA", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsAfricaRegionalGroup(string title)
@@ -842,6 +880,16 @@ public sealed class GroupFlagStore
             return !string.IsNullOrWhiteSpace(result.Flag);
         }
 
+        if (TryResolveArabicBrandGroup(trimmedTitle, out result))
+        {
+            return true;
+        }
+
+        if (TryResolveLatinAmericaArgentinaGroup(trimmedTitle, out result))
+        {
+            return true;
+        }
+
         if (TryResolveRegionalCountryFromSegments(trimmedTitle, "LA", out result))
         {
             return true;
@@ -853,6 +901,67 @@ public sealed class GroupFlagStore
         }
 
         return false;
+    }
+
+    private bool TryResolveArabicBrandGroup(string title, out GroupFlagInfo result)
+    {
+        result = new GroupFlagInfo(string.Empty, title);
+        if (TryResolveArabicBrandGroup(title, "NETFLIX", "netflix.png", "Netflix", out result)
+            || TryResolveArabicBrandGroup(title, "BEIN", "bein.png", "beIN", out result)
+            || TryResolveArabicBrandGroup(title, "MBC", "mbc.png", "MBC", out result)
+            || TryResolveArabicBrandGroup(title, "ALWAN", "alwan.png", "ALWAN", out result))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryResolveArabicBrandGroup(string title, string segmentPrefix, string assetFileName, string label, out GroupFlagInfo result)
+    {
+        result = new GroupFlagInfo(string.Empty, title);
+        if (!TryGetRegionalGroupFirstSegment(title, "AR", out var segment) ||
+            !segment.StartsWith(segmentPrefix, StringComparison.CurrentCultureIgnoreCase))
+        {
+            return false;
+        }
+
+        result = new GroupFlagInfo(BuildGroupAssetPath(assetFileName), label);
+        return !string.IsNullOrWhiteSpace(result.Flag);
+    }
+
+    private bool TryResolveLatinAmericaArgentinaGroup(string title, out GroupFlagInfo result)
+    {
+        result = new GroupFlagInfo(string.Empty, title);
+        var segments = title
+            .Split(GroupSeparators, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .ToList();
+
+        if (segments.Count != 2 ||
+            !string.Equals(segments[0], "LA", StringComparison.CurrentCultureIgnoreCase) ||
+            !string.Equals(segments[1], "ARGENTINA", StringComparison.CurrentCultureIgnoreCase))
+        {
+            return false;
+        }
+
+        result = new GroupFlagInfo(BuildFlagAssetPath("AR"), "Argentina");
+        return !string.IsNullOrWhiteSpace(result.Flag);
+    }
+
+    private static bool TryGetRegionalGroupFirstSegment(string title, string regionMarker, out string segment)
+    {
+        segment = string.Empty;
+        var segments = title
+            .Split(GroupSeparators, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .ToList();
+
+        if (segments.Count < 2 || !string.Equals(segments[0], regionMarker, StringComparison.CurrentCultureIgnoreCase))
+        {
+            return false;
+        }
+
+        segment = segments[1];
+        return !string.IsNullOrWhiteSpace(segment);
     }
 
     private static bool IsAsia24SevenGroup(string title)

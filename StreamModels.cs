@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Text.Json.Serialization;
 
 namespace Schmube;
 
@@ -32,6 +33,18 @@ public sealed class StreamSettings
     public string ColumnPreset { get; set; } = string.Empty;
 
     public Dictionary<string, string> CustomChannelGroups { get; set; } = [];
+
+    public int RecordingDefaultDurationMinutes { get; set; } = 60;
+
+    public int RecordingStartPaddingMinutes { get; set; }
+
+    public int RecordingEndPaddingMinutes { get; set; }
+
+    public string RecordingFileNameFormat { get; set; } = "{timestamp}_{channel}";
+
+    public List<RecordingScheduleEntry> RecordingSchedules { get; set; } = [];
+
+    public List<RecordingHistoryEntry> RecordingHistory { get; set; } = [];
 }
 
 public sealed class GroupFilterOption
@@ -73,6 +86,104 @@ public sealed class PlaybackRequest
     public string LogoSource { get; }
 
     public string FallbackLogoSource { get; }
+}
+
+public sealed class RecordingScheduleEntry
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    public string StreamUri { get; set; } = string.Empty;
+
+    public string DisplayName { get; set; } = string.Empty;
+
+    public bool KeepPlayerOnTop { get; set; }
+
+    public bool AllowReconnect { get; set; } = true;
+
+    public string RecordingsDirectory { get; set; } = string.Empty;
+
+    public string LogoSource { get; set; } = string.Empty;
+
+    public string FallbackLogoSource { get; set; } = string.Empty;
+
+    public string ProgramTitle { get; set; } = string.Empty;
+
+    public DateTime StartLocal { get; set; }
+
+    public DateTime EndLocal { get; set; }
+
+    public DateTime CreatedLocal { get; set; } = DateTime.Now;
+
+    [JsonIgnore]
+    public string Summary => string.IsNullOrWhiteSpace(ProgramTitle)
+        ? $"{DisplayName} | {StartLocal:g} - {EndLocal:t}"
+        : $"{DisplayName} | {ProgramTitle} | {StartLocal:g} - {EndLocal:t}";
+
+    [JsonIgnore]
+    public string DurationText => EndLocal > StartLocal
+        ? $"{EndLocal - StartLocal:hh\\:mm}"
+        : "00:00";
+
+    public PlaybackRequest ToPlaybackRequest()
+    {
+        return new PlaybackRequest(
+            new Uri(StreamUri, UriKind.Absolute),
+            KeepPlayerOnTop,
+            DisplayName,
+            AllowReconnect,
+            RecordingsDirectory,
+            LogoSource,
+            FallbackLogoSource);
+    }
+}
+
+public sealed class RecordingHistoryEntry
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    public string DisplayName { get; set; } = string.Empty;
+
+    public string ProgramTitle { get; set; } = string.Empty;
+
+    public string FilePath { get; set; } = string.Empty;
+
+    public DateTime StartedLocal { get; set; }
+
+    public DateTime EndedLocal { get; set; }
+
+    public string Status { get; set; } = string.Empty;
+
+    public long FileSizeBytes { get; set; }
+
+    [JsonIgnore]
+    public string FileName => string.IsNullOrWhiteSpace(FilePath) ? string.Empty : System.IO.Path.GetFileName(FilePath);
+
+    [JsonIgnore]
+    public string SizeText
+    {
+        get
+        {
+            if (FileSizeBytes <= 0)
+            {
+                return "Unknown size";
+            }
+
+            var megabytes = FileSizeBytes / 1024d / 1024d;
+            return megabytes >= 1024
+                ? $"{megabytes / 1024d:0.00} GB"
+                : $"{megabytes:0.0} MB";
+        }
+    }
+
+    [JsonIgnore]
+    public string Summary
+    {
+        get
+        {
+            var title = string.IsNullOrWhiteSpace(ProgramTitle) ? DisplayName : $"{DisplayName} | {ProgramTitle}";
+            return $"{Status}: {title} | {StartedLocal:g} - {EndedLocal:t} | {SizeText}";
+        }
+    }
 }
 
 public sealed class PlaylistChannel : INotifyPropertyChanged

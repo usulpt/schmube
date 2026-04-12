@@ -444,6 +444,13 @@
                                             BorderThickness="1"
                                             CornerRadius="8">
                                         <StackPanel>
+                                            <Button Width="72"
+                                                    Height="26"
+                                                    Margin="0,0,0,6"
+                                                    HorizontalAlignment="Left"
+                                                    Content="Record"
+                                                    Click="RecordProgramGuideEntryButton_Click"
+                                                    ToolTip="Schedule this program on the selected channel." />
                                             <TextBox Style="{StaticResource SelectableInfoTextBoxStyle}"
                                                      Margin="0,0,0,2"
                                                      FontWeight="SemiBold"
@@ -460,6 +467,40 @@
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
+
+                        <TextBlock Style="{StaticResource SelectedChannelFieldLabelStyle}" Text="Recording Defaults" />
+                        <UniformGrid Columns="3" Margin="0,0,0,8">
+                            <StackPanel Margin="0,0,6,0">
+                                <TextBlock Foreground="{DynamicResource SecondaryTextBrush}" Text="Minutes" />
+                                <TextBox x:Name="RecordingDefaultDurationTextBox"
+                                         Height="30"
+                                         Padding="8,5"
+                                         VerticalContentAlignment="Center"
+                                         ToolTip="Default manual schedule duration in minutes." />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,6,0">
+                                <TextBlock Foreground="{DynamicResource SecondaryTextBrush}" Text="Start Pad" />
+                                <TextBox x:Name="RecordingStartPaddingTextBox"
+                                         Height="30"
+                                         Padding="8,5"
+                                         VerticalContentAlignment="Center"
+                                         ToolTip="Minutes to start before an EPG program." />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Foreground="{DynamicResource SecondaryTextBrush}" Text="End Pad" />
+                                <TextBox x:Name="RecordingEndPaddingTextBox"
+                                         Height="30"
+                                         Padding="8,5"
+                                         VerticalContentAlignment="Center"
+                                         ToolTip="Minutes to continue after an EPG program." />
+                            </StackPanel>
+                        </UniformGrid>
+                        <TextBox x:Name="RecordingFileNameFormatTextBox"
+                                 Height="30"
+                                 Margin="0,0,0,12"
+                                 Padding="8,5"
+                                 VerticalContentAlignment="Center"
+                                 ToolTip="Recording filename format. Available tokens: {timestamp}, {channel}, {program}." />
 
                     </StackPanel>
                 </ScrollViewer>
@@ -574,6 +615,17 @@
                                     <DataTemplate>
                                         <TextBlock Tag="GroupDisplayTitle"
                                                    ToolTip="{Binding GroupDisplayTitle}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Loaded="HighlightedChannelTextBlock_Loaded"
+                                                   DataContextChanged="HighlightedChannelTextBlock_DataContextChanged" />
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
+                            <GridViewColumn x:Name="SourceGroupColumn" Header="Source Group" Width="0">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Tag="GroupTitle"
+                                                   ToolTip="{Binding GroupTitle}"
                                                    TextTrimming="CharacterEllipsis"
                                                    Loaded="HighlightedChannelTextBlock_Loaded"
                                                    DataContextChanged="HighlightedChannelTextBlock_DataContextChanged" />

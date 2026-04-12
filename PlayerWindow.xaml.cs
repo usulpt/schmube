@@ -1,4 +1,5 @@
 using System;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -76,15 +77,25 @@ public partial class PlayerWindow : Window
     private readonly MediaPlayer _mediaPlayer;
     private readonly DispatcherTimer _networkDebitStatusTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DispatcherTimer _recordingTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DispatcherTimer _recordingScheduleTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly ObservableCollection<RecordingScheduleEntry> _recordingSchedules = [];
+    private readonly ObservableCollection<RecordingHistoryEntry> _recordingHistory = [];
 
     private Media? _currentMedia;
     private PlaybackRequest? _currentRequest;
+    private RecordingScheduleEntry? _activeScheduledRecording;
     private CancellationTokenSource? _reconnectCts;
     private bool _manualStopRequested;
     private int _reconnectAttempt;
     private bool _isRecording;
     private string _recordingFilePath = string.Empty;
+    private string _activeRecordingDisplayName = string.Empty;
+    private string _activeRecordingProgramTitle = string.Empty;
     private DateTime _recordingStartedAt;
+    private bool _isScheduledRecordingActive;
+    private bool _scheduleSwitchWarningShown;
+    private int _recordingDefaultDurationMinutes = 60;
+    private string _recordingFileNameFormat = "{timestamp}_{channel}";
     private bool _keepPlayerOnTopRequested;
     private bool _isFullScreen;
     private WindowState _restoreWindowState = WindowState.Normal;
@@ -100,6 +111,7 @@ public partial class PlayerWindow : Window
 
     public event EventHandler<int>? ChannelStepRequested;
     public event EventHandler? PlaybackStopped;
+    public event EventHandler? RecordingStateChanged;
 
     public PlayerWindow()
     {
@@ -111,9 +123,12 @@ public partial class PlayerWindow : Window
         _mediaPlayer = new MediaPlayer(_libVlc);
         _mediaPlayer.Volume = DefaultVolume;
         VideoSurface.MediaPlayer = _mediaPlayer;
+        RecordingSchedulesListBox.ItemsSource = _recordingSchedules;
+        RecordingHistoryListBox.ItemsSource = _recordingHistory;
 
         _networkDebitStatusTimer.Tick += (_, _) => RefreshBufferingStatus();
         _recordingTimer.Tick += (_, _) => UpdateRecordingTimerText();
+        _recordingScheduleTimer.Tick += (_, _) => UpdateScheduledRecording();
 
         _mediaPlayer.Playing += (_, _) => SetPlaybackStatus("Playing.");
         _mediaPlayer.Buffering += (_, e) => SetBufferingStatus(e.Cache);
@@ -129,7 +144,9 @@ public partial class PlayerWindow : Window
 
         PreviewKeyDown += PlayerWindow_PreviewKeyDown;
 
+        InitializeRecordingScheduleInputs();
         UpdateRecordingVisualState();
+        UpdateRecordingScheduleVisualState();
         UpdateAudioVisualState();
         UpdateNetworkDebitVisualState();
         UpdateScreenshotButtonState();
@@ -142,6 +159,19 @@ public partial class PlayerWindow : Window
             CancelReconnect();
             _manualStopRequested = false;
             _reconnectAttempt = 0;
+            if (_isRecording && _currentRequest is not null)
+            {
+                StopRecordingCore(_currentRequest, _isScheduledRecordingActive ? "Cancelled" : "Stopped");
+            }
+
+            if (_activeScheduledRecording is not null)
+            {
+                _recordingSchedules.Remove(_activeScheduledRecording);
+                _activeScheduledRecording = null;
+                _isScheduledRecordingActive = false;
+                NotifyRecordingStateChanged();
+            }
+
             _currentRequest = request;
             ResetRecordingState();
 
@@ -152,6 +182,7 @@ public partial class PlayerWindow : Window
 
             StartPlaybackCore(request, isReconnect: false);
             UpdateRecordingVisualState();
+            UpdateRecordingScheduleVisualState();
             UpdateAudioVisualState();
             UpdateScreenshotButtonState();
         }).Task;
@@ -161,9 +192,15 @@ public partial class PlayerWindow : Window
     {
         CancelReconnect();
         _manualStopRequested = true;
+        if (_isRecording && _currentRequest is not null)
+        {
+            StopRecordingCore(_currentRequest, _isScheduledRecordingActive ? "Cancelled" : "Stopped");
+        }
+
         _currentRequest = null;
         UpdateNowPlayingLogo(string.Empty, string.Empty);
         ResetRecordingState();
+        UpdateRecordingScheduleVisualState();
         ResetNetworkDebit();
         StopBufferingStatusUpdates();
 
@@ -398,25 +435,598 @@ public partial class PlayerWindow : Window
 
         if (_isRecording)
         {
-            var completedFile = _recordingFilePath;
-            _isRecording = false;
-            _recordingFilePath = string.Empty;
-            _recordingStartedAt = default;
-            UpdateRecordingVisualState();
-            StartPlaybackCore(request, isReconnect: false);
+            var completedFile = StopRecordingCore(request, _isScheduledRecordingActive ? "Cancelled" : "Stopped");
+            if (_activeScheduledRecording is not null)
+            {
+                _recordingSchedules.Remove(_activeScheduledRecording);
+                _activeScheduledRecording = null;
+                _isScheduledRecordingActive = false;
+                NotifyRecordingStateChanged();
+            }
+
             SetStatus($"Recording stopped. Saved to {completedFile}");
             return;
         }
 
+        BeginRecordingCore(request);
+        SetStatus($"Recording to {_recordingFilePath}");
+    }
+
+    private void BeginRecordingCore(PlaybackRequest request, RecordingScheduleEntry? schedule = null)
+    {
         var recordingsDirectory = ResolveRecordingsDirectory(request.RecordingsDirectory);
         Directory.CreateDirectory(recordingsDirectory);
 
-        _recordingFilePath = Path.Combine(recordingsDirectory, BuildRecordingFileName(request.DisplayName));
+        _recordingFilePath = Path.Combine(recordingsDirectory, BuildRecordingFileName(request.DisplayName, schedule?.ProgramTitle ?? string.Empty));
+        _activeRecordingDisplayName = request.DisplayName;
+        _activeRecordingProgramTitle = schedule?.ProgramTitle ?? string.Empty;
         _isRecording = true;
         _recordingStartedAt = DateTime.Now;
         UpdateRecordingVisualState();
+        try
+        {
+            StartPlaybackCore(request, isReconnect: false);
+        }
+        catch
+        {
+            _isRecording = false;
+            _recordingFilePath = string.Empty;
+            _activeRecordingDisplayName = string.Empty;
+            _activeRecordingProgramTitle = string.Empty;
+            _recordingStartedAt = default;
+            UpdateRecordingVisualState();
+            throw;
+        }
+    }
+
+    private string StopRecordingCore(PlaybackRequest request, string status)
+    {
+        var completedFile = _recordingFilePath;
+        var startedAt = _recordingStartedAt == default ? DateTime.Now : _recordingStartedAt;
+        var displayName = string.IsNullOrWhiteSpace(_activeRecordingDisplayName) ? request.DisplayName : _activeRecordingDisplayName;
+        var programTitle = _activeRecordingProgramTitle;
+        _isRecording = false;
+        _recordingFilePath = string.Empty;
+        _activeRecordingDisplayName = string.Empty;
+        _activeRecordingProgramTitle = string.Empty;
+        _recordingStartedAt = default;
+        UpdateRecordingVisualState();
         StartPlaybackCore(request, isReconnect: false);
-        SetStatus($"Recording to {_recordingFilePath}");
+        AddRecordingHistory(displayName, programTitle, completedFile, startedAt, DateTime.Now, status);
+        return completedFile;
+    }
+
+    private void ScheduleRecordingButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentRequest is null)
+        {
+            SetStatus("Play a channel before scheduling a recording.");
+            return;
+        }
+
+        try
+        {
+            if (!TryReadRecordingSchedule(out var startAt, out var duration, out var errorMessage))
+            {
+                SetStatus(errorMessage);
+                return;
+            }
+
+            if (_isRecording)
+            {
+                SetStatus("Stop the current recording before scheduling another one.");
+                return;
+            }
+
+            ScheduleRecording(_currentRequest, startAt, startAt.Add(duration), string.Empty);
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Recording schedule failed: {ex.Message}");
+        }
+    }
+
+    private void CancelRecordingScheduleButton_Click(object sender, RoutedEventArgs e)
+    {
+        var schedule = RecordingSchedulesListBox.SelectedItem as RecordingScheduleEntry
+            ?? _activeScheduledRecording
+            ?? GetNextRecordingSchedule();
+        if (schedule is null)
+        {
+            SetStatus("No recording is scheduled.");
+            return;
+        }
+
+        if (ReferenceEquals(schedule, _activeScheduledRecording) && _isScheduledRecordingActive && _isRecording && _currentRequest is not null)
+        {
+            var completedFile = StopRecordingCore(_currentRequest, "Cancelled");
+            _recordingSchedules.Remove(schedule);
+            _activeScheduledRecording = null;
+            _isScheduledRecordingActive = false;
+            NotifyRecordingStateChanged();
+            UpdateRecordingScheduleVisualState();
+            SetStatus($"Scheduled recording cancelled. Saved to {completedFile}");
+            return;
+        }
+
+        _recordingSchedules.Remove(schedule);
+        EnsureRecordingScheduleTimer();
+        NotifyRecordingStateChanged();
+        UpdateRecordingScheduleVisualState();
+        SetStatus("Scheduled recording cancelled.");
+    }
+
+    private bool TryReadRecordingSchedule(out DateTime startAt, out TimeSpan duration, out string errorMessage)
+    {
+        startAt = default;
+        duration = default;
+        errorMessage = string.Empty;
+
+        if (RecordingScheduleDatePicker.SelectedDate is not { } selectedDate)
+        {
+            errorMessage = "Choose a recording date.";
+            return false;
+        }
+
+        if (!TimeSpan.TryParse(RecordingScheduleTimeTextBox.Text.Trim(), CultureInfo.CurrentCulture, out var startTime))
+        {
+            errorMessage = "Enter the recording start time, for example 21:30.";
+            return false;
+        }
+
+        if (startTime < TimeSpan.Zero || startTime >= TimeSpan.FromDays(1))
+        {
+            errorMessage = "Enter a start time between 00:00 and 23:59.";
+            return false;
+        }
+
+        if (!int.TryParse(RecordingScheduleDurationTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.CurrentCulture, out var durationMinutes) ||
+            durationMinutes <= 0)
+        {
+            errorMessage = "Enter a recording duration greater than 0 minutes.";
+            return false;
+        }
+
+        startAt = selectedDate.Date.Add(startTime);
+        duration = TimeSpan.FromMinutes(durationMinutes);
+        if (startAt <= DateTime.Now)
+        {
+            errorMessage = "Choose a future recording start time.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private void InitializeRecordingScheduleInputs()
+    {
+        var defaultStart = DateTime.Now.AddMinutes(5);
+        RecordingScheduleDatePicker.SelectedDate = defaultStart.Date;
+        RecordingScheduleTimeTextBox.Text = defaultStart.ToString("HH:mm", CultureInfo.CurrentCulture);
+        RecordingScheduleDurationTextBox.Text = _recordingDefaultDurationMinutes.ToString(CultureInfo.CurrentCulture);
+    }
+
+    public void ConfigureRecordingDefaults(int defaultDurationMinutes, string fileNameFormat)
+    {
+        _recordingDefaultDurationMinutes = Math.Clamp(defaultDurationMinutes, 1, 1440);
+        _recordingFileNameFormat = string.IsNullOrWhiteSpace(fileNameFormat)
+            ? "{timestamp}_{channel}"
+            : fileNameFormat.Trim();
+        if (!_isRecording && string.IsNullOrWhiteSpace(RecordingScheduleDurationTextBox.Text))
+        {
+            RecordingScheduleDurationTextBox.Text = _recordingDefaultDurationMinutes.ToString(CultureInfo.CurrentCulture);
+        }
+    }
+
+    public void LoadRecordingState(IEnumerable<RecordingScheduleEntry> schedules, IEnumerable<RecordingHistoryEntry> history)
+    {
+        _recordingSchedules.Clear();
+        foreach (var schedule in schedules
+                     .Where(IsUsableSchedule)
+                     .OrderBy(schedule => schedule.StartLocal)
+                     .ThenBy(schedule => schedule.DisplayName, StringComparer.CurrentCultureIgnoreCase))
+        {
+            _recordingSchedules.Add(schedule);
+        }
+
+        _recordingHistory.Clear();
+        foreach (var entry in history
+                     .OrderByDescending(entry => entry.StartedLocal)
+                     .Take(50))
+        {
+            _recordingHistory.Add(entry);
+        }
+
+        EnsureRecordingScheduleTimer();
+        UpdateRecordingScheduleVisualState();
+    }
+
+    public IReadOnlyList<RecordingScheduleEntry> GetRecordingSchedulesSnapshot()
+    {
+        return _recordingSchedules
+            .OrderBy(schedule => schedule.StartLocal)
+            .Select(CloneSchedule)
+            .ToList();
+    }
+
+    public IReadOnlyList<RecordingHistoryEntry> GetRecordingHistorySnapshot()
+    {
+        return _recordingHistory
+            .OrderByDescending(entry => entry.StartedLocal)
+            .Select(CloneHistory)
+            .ToList();
+    }
+
+    public void ScheduleRecording(PlaybackRequest request, DateTime startAt, DateTime endAt, string programTitle)
+    {
+        if (endAt <= startAt)
+        {
+            throw new InvalidOperationException("Recording end time must be after the start time.");
+        }
+
+        if (endAt <= DateTime.Now)
+        {
+            throw new InvalidOperationException("Choose a future recording end time.");
+        }
+
+        var schedule = new RecordingScheduleEntry
+        {
+            StreamUri = request.StreamUri.ToString(),
+            DisplayName = request.DisplayName,
+            KeepPlayerOnTop = request.KeepPlayerOnTop,
+            AllowReconnect = request.AllowReconnect,
+            RecordingsDirectory = request.RecordingsDirectory,
+            LogoSource = request.LogoSource,
+            FallbackLogoSource = request.FallbackLogoSource,
+            ProgramTitle = programTitle.Trim(),
+            StartLocal = startAt,
+            EndLocal = endAt,
+            CreatedLocal = DateTime.Now
+        };
+
+        var conflict = _recordingSchedules.FirstOrDefault(existing =>
+            existing.StartLocal < schedule.EndLocal && schedule.StartLocal < existing.EndLocal);
+        if (conflict is not null)
+        {
+            SetStatus($"Recording scheduled, but it overlaps {conflict.DisplayName} at {conflict.StartLocal:g}. The earlier due recording wins if both are still queued.");
+        }
+        else
+        {
+            SetStatus($"Recording scheduled for {schedule.DisplayName} at {schedule.StartLocal:g}.");
+        }
+
+        _recordingSchedules.Add(schedule);
+        SortRecordingSchedules();
+        RecordingSchedulesListBox.SelectedItem = schedule;
+        EnsureRecordingScheduleTimer();
+        NotifyRecordingStateChanged();
+        UpdateRecordingScheduleVisualState();
+    }
+
+    private void UpdateScheduledRecording()
+    {
+        if (_recordingSchedules.Count == 0)
+        {
+            _recordingScheduleTimer.Stop();
+            return;
+        }
+
+        var now = DateTime.Now;
+        if (!_isScheduledRecordingActive)
+        {
+            RemoveExpiredSchedules(now);
+            var dueSchedule = _recordingSchedules
+                .OrderBy(schedule => schedule.StartLocal)
+                .FirstOrDefault(schedule => schedule.StartLocal <= now && now < schedule.EndLocal);
+            if (dueSchedule is not null)
+            {
+                StartScheduledRecording(dueSchedule);
+                return;
+            }
+
+            var nextSchedule = GetNextRecordingSchedule();
+            if (nextSchedule is not null &&
+                !_scheduleSwitchWarningShown &&
+                nextSchedule.StartLocal > now &&
+                nextSchedule.StartLocal - now <= TimeSpan.FromMinutes(1))
+            {
+                _scheduleSwitchWarningShown = true;
+                var switchText = _currentRequest is not null &&
+                                 !string.Equals(_currentRequest.StreamUri.ToString(), nextSchedule.StreamUri, StringComparison.OrdinalIgnoreCase)
+                    ? $" It will switch from {_currentRequest.DisplayName}."
+                    : string.Empty;
+                SetStatus($"Recording {nextSchedule.DisplayName} starts in under 1 minute.{switchText}");
+            }
+
+            UpdateRecordingScheduleVisualState();
+            return;
+        }
+
+        if (_activeScheduledRecording is not null && now >= _activeScheduledRecording.EndLocal)
+        {
+            FinishScheduledRecording();
+            return;
+        }
+
+        UpdateRecordingScheduleVisualState();
+    }
+
+    private void StartScheduledRecording(RecordingScheduleEntry schedule)
+    {
+        if (_isRecording)
+        {
+            _recordingSchedules.Remove(schedule);
+            NotifyRecordingStateChanged();
+            UpdateRecordingScheduleVisualState();
+            SetStatus("Scheduled recording skipped because another recording is already running.");
+            return;
+        }
+
+        try
+        {
+            var request = schedule.ToPlaybackRequest();
+            CancelReconnect();
+            _isScheduledRecordingActive = true;
+            _activeScheduledRecording = schedule;
+            _scheduleSwitchWarningShown = false;
+            _currentRequest = request;
+            _manualStopRequested = false;
+            _reconnectAttempt = 0;
+
+            SetAlwaysOnTop(request.KeepPlayerOnTop);
+            NowPlayingText.Text = request.DisplayName;
+            UpdateNowPlayingLogo(request.LogoSource, request.FallbackLogoSource);
+            Title = $"Schmube Player - {request.DisplayName}";
+
+            BeginRecordingCore(request, schedule);
+            UpdateRecordingScheduleVisualState();
+            UpdateScreenshotButtonState();
+            SetStatus($"Scheduled recording started for {request.DisplayName}. Saving to {_recordingFilePath}");
+        }
+        catch (Exception ex)
+        {
+            _isRecording = false;
+            _recordingFilePath = string.Empty;
+            _recordingStartedAt = default;
+            _activeScheduledRecording = null;
+            _isScheduledRecordingActive = false;
+            _recordingSchedules.Remove(schedule);
+            NotifyRecordingStateChanged();
+            UpdateRecordingVisualState();
+            UpdateRecordingScheduleVisualState();
+            SetStatus($"Scheduled recording failed: {ex.Message}");
+        }
+    }
+
+    private void FinishScheduledRecording()
+    {
+        if (_currentRequest is null || !_isRecording)
+        {
+            if (_activeScheduledRecording is not null)
+            {
+                _recordingSchedules.Remove(_activeScheduledRecording);
+            }
+
+            _activeScheduledRecording = null;
+            _isScheduledRecordingActive = false;
+            EnsureRecordingScheduleTimer();
+            NotifyRecordingStateChanged();
+            UpdateRecordingScheduleVisualState();
+            SetStatus("Scheduled recording ended.");
+            return;
+        }
+
+        try
+        {
+            var completedFile = StopRecordingCore(_currentRequest, "Finished");
+            if (_activeScheduledRecording is not null)
+            {
+                _recordingSchedules.Remove(_activeScheduledRecording);
+            }
+
+            _activeScheduledRecording = null;
+            _isScheduledRecordingActive = false;
+            EnsureRecordingScheduleTimer();
+            NotifyRecordingStateChanged();
+            UpdateRecordingScheduleVisualState();
+            SetStatus($"Scheduled recording finished. Saved to {completedFile}");
+        }
+        catch (Exception ex)
+        {
+            if (_activeScheduledRecording is not null)
+            {
+                _recordingSchedules.Remove(_activeScheduledRecording);
+            }
+
+            _activeScheduledRecording = null;
+            _isScheduledRecordingActive = false;
+            EnsureRecordingScheduleTimer();
+            NotifyRecordingStateChanged();
+            UpdateRecordingScheduleVisualState();
+            SetStatus($"Scheduled recording finished, but playback restore failed: {ex.Message}");
+        }
+    }
+
+    private void RemoveExpiredSchedules(DateTime now)
+    {
+        var expiredSchedules = _recordingSchedules
+            .Where(schedule => schedule.EndLocal <= now)
+            .ToList();
+        if (expiredSchedules.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var schedule in expiredSchedules)
+        {
+            _recordingSchedules.Remove(schedule);
+            AddRecordingHistory(
+                schedule.DisplayName,
+                schedule.ProgramTitle,
+                string.Empty,
+                schedule.StartLocal,
+                now,
+                "Missed");
+        }
+
+        NotifyRecordingStateChanged();
+    }
+
+    private void UpdateRecordingScheduleVisualState()
+    {
+        var nextSchedule = _activeScheduledRecording ?? GetNextRecordingSchedule();
+        var hasSchedule = nextSchedule is not null;
+        ScheduleRecordingButton.IsEnabled = _currentRequest is not null && !_isRecording;
+        ScheduleRecordingButton.Content = "Schedule";
+        CancelRecordingScheduleButton.IsEnabled = hasSchedule;
+        RecordingScheduleDatePicker.IsEnabled = !_isScheduledRecordingActive;
+        RecordingScheduleTimeTextBox.IsEnabled = !_isScheduledRecordingActive;
+        RecordingScheduleDurationTextBox.IsEnabled = !_isScheduledRecordingActive;
+
+        if (nextSchedule is null)
+        {
+            RecordingScheduleText.Text = "No recording scheduled.";
+            return;
+        }
+
+        if (_isScheduledRecordingActive)
+        {
+            var remaining = nextSchedule.EndLocal - DateTime.Now;
+            if (remaining < TimeSpan.Zero)
+            {
+                remaining = TimeSpan.Zero;
+            }
+
+            RecordingScheduleText.Text = $"Recording {nextSchedule.DisplayName} until {nextSchedule.EndLocal:t} ({FormatScheduleCountdown(remaining)} left)";
+            return;
+        }
+
+        var startsIn = nextSchedule.StartLocal - DateTime.Now;
+        if (startsIn < TimeSpan.Zero)
+        {
+            startsIn = TimeSpan.Zero;
+        }
+
+        RecordingScheduleText.Text = $"Next: {nextSchedule.DisplayName} at {nextSchedule.StartLocal:g} ({FormatScheduleCountdown(startsIn)})";
+    }
+
+    private RecordingScheduleEntry? GetNextRecordingSchedule()
+    {
+        return _recordingSchedules
+            .OrderBy(schedule => schedule.StartLocal)
+            .FirstOrDefault();
+    }
+
+    private void EnsureRecordingScheduleTimer()
+    {
+        if (_recordingSchedules.Count > 0)
+        {
+            _recordingScheduleTimer.Start();
+        }
+        else
+        {
+            _recordingScheduleTimer.Stop();
+        }
+    }
+
+    private static bool IsUsableSchedule(RecordingScheduleEntry schedule)
+    {
+        return !string.IsNullOrWhiteSpace(schedule.StreamUri) &&
+               Uri.TryCreate(schedule.StreamUri, UriKind.Absolute, out _) &&
+               !string.IsNullOrWhiteSpace(schedule.DisplayName) &&
+               schedule.EndLocal > DateTime.Now;
+    }
+
+    private void SortRecordingSchedules()
+    {
+        var sorted = _recordingSchedules
+            .OrderBy(schedule => schedule.StartLocal)
+            .ThenBy(schedule => schedule.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        _recordingSchedules.Clear();
+        foreach (var schedule in sorted)
+        {
+            _recordingSchedules.Add(schedule);
+        }
+    }
+
+    private void AddRecordingHistory(string displayName, string programTitle, string filePath, DateTime startedAt, DateTime endedAt, string status)
+    {
+        var fileSize = 0L;
+        if (!string.IsNullOrWhiteSpace(filePath) && File.Exists(filePath))
+        {
+            fileSize = new FileInfo(filePath).Length;
+        }
+
+        _recordingHistory.Insert(0, new RecordingHistoryEntry
+        {
+            DisplayName = displayName,
+            ProgramTitle = programTitle,
+            FilePath = filePath,
+            StartedLocal = startedAt,
+            EndedLocal = endedAt,
+            Status = status,
+            FileSizeBytes = fileSize
+        });
+
+        while (_recordingHistory.Count > 50)
+        {
+            _recordingHistory.RemoveAt(_recordingHistory.Count - 1);
+        }
+
+        NotifyRecordingStateChanged();
+    }
+
+    private void NotifyRecordingStateChanged()
+    {
+        RecordingStateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private static RecordingScheduleEntry CloneSchedule(RecordingScheduleEntry schedule)
+    {
+        return new RecordingScheduleEntry
+        {
+            Id = schedule.Id,
+            StreamUri = schedule.StreamUri,
+            DisplayName = schedule.DisplayName,
+            KeepPlayerOnTop = schedule.KeepPlayerOnTop,
+            AllowReconnect = schedule.AllowReconnect,
+            RecordingsDirectory = schedule.RecordingsDirectory,
+            LogoSource = schedule.LogoSource,
+            FallbackLogoSource = schedule.FallbackLogoSource,
+            ProgramTitle = schedule.ProgramTitle,
+            StartLocal = schedule.StartLocal,
+            EndLocal = schedule.EndLocal,
+            CreatedLocal = schedule.CreatedLocal
+        };
+    }
+
+    private static RecordingHistoryEntry CloneHistory(RecordingHistoryEntry entry)
+    {
+        return new RecordingHistoryEntry
+        {
+            Id = entry.Id,
+            DisplayName = entry.DisplayName,
+            ProgramTitle = entry.ProgramTitle,
+            FilePath = entry.FilePath,
+            StartedLocal = entry.StartedLocal,
+            EndedLocal = entry.EndedLocal,
+            Status = entry.Status,
+            FileSizeBytes = entry.FileSizeBytes
+        };
+    }
+
+    private static string FormatScheduleCountdown(TimeSpan value)
+    {
+        if (value < TimeSpan.Zero)
+        {
+            value = TimeSpan.Zero;
+        }
+
+        return value.TotalDays >= 1
+            ? $"{(int)value.TotalDays}d {value:hh\\:mm\\:ss}"
+            : $"{value:hh\\:mm\\:ss}";
     }
 
     private void OpenRecordingsButton_Click(object sender, RoutedEventArgs e)
@@ -438,6 +1048,84 @@ public partial class PlayerWindow : Window
         }
     }
 
+    private void ToggleRecordingHistoryButton_Click(object sender, RoutedEventArgs e)
+    {
+        RecordingHistoryPanel.Visibility = RecordingHistoryPanel.Visibility == Visibility.Visible
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
+    private void OpenRecordingHistoryItemButton_Click(object sender, RoutedEventArgs e)
+    {
+        var entry = RecordingHistoryListBox.SelectedItem as RecordingHistoryEntry;
+        if (entry is null || string.IsNullOrWhiteSpace(entry.FilePath))
+        {
+            SetStatus("Select a recording history item first.");
+            return;
+        }
+
+        if (!File.Exists(entry.FilePath))
+        {
+            SetStatus("Recording file is no longer available.");
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = "explorer.exe",
+            Arguments = $"/select,\"{entry.FilePath}\"",
+            UseShellExecute = true
+        });
+    }
+
+    private void PlayRecordingHistoryItemButton_Click(object sender, RoutedEventArgs e)
+    {
+        var entry = RecordingHistoryListBox.SelectedItem as RecordingHistoryEntry;
+        if (entry is null || string.IsNullOrWhiteSpace(entry.FilePath))
+        {
+            SetStatus("Select a recording history item first.");
+            return;
+        }
+
+        if (!File.Exists(entry.FilePath))
+        {
+            SetStatus("Recording file is no longer available.");
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = entry.FilePath,
+            UseShellExecute = true
+        });
+    }
+
+    private void DeleteRecordingHistoryItemButton_Click(object sender, RoutedEventArgs e)
+    {
+        var entry = RecordingHistoryListBox.SelectedItem as RecordingHistoryEntry;
+        if (entry is null)
+        {
+            SetStatus("Select a recording history item first.");
+            return;
+        }
+
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(entry.FilePath) && File.Exists(entry.FilePath))
+            {
+                File.Delete(entry.FilePath);
+            }
+
+            _recordingHistory.Remove(entry);
+            NotifyRecordingStateChanged();
+            SetStatus("Recording history item deleted.");
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Could not delete recording: {ex.Message}");
+        }
+    }
+
     private static string ResolveRecordingsDirectory(string configuredDirectory)
     {
         if (!string.IsNullOrWhiteSpace(configuredDirectory))
@@ -450,26 +1138,47 @@ public partial class PlayerWindow : Window
             "Schmube");
     }
 
-    private static string BuildRecordingFileName(string displayName)
+    private string BuildRecordingFileName(string displayName, string programTitle)
     {
-        var invalidCharacters = Path.GetInvalidFileNameChars().ToHashSet();
-        var sanitized = new string(displayName
-            .Select(ch => invalidCharacters.Contains(ch) ? '_' : ch)
-            .ToArray())
-            .Trim();
+        var channel = SanitizeFileNameToken(displayName, "channel");
+        var program = SanitizeFileNameToken(programTitle, string.Empty);
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
+        var format = string.IsNullOrWhiteSpace(_recordingFileNameFormat)
+            ? "{timestamp}_{channel}"
+            : _recordingFileNameFormat;
+        var fileName = format
+            .Replace("{timestamp}", timestamp, StringComparison.OrdinalIgnoreCase)
+            .Replace("{channel}", channel, StringComparison.OrdinalIgnoreCase)
+            .Replace("{program}", program, StringComparison.OrdinalIgnoreCase);
+        var sanitized = SanitizeFileNameToken(fileName, $"{timestamp}_{channel}");
 
         if (string.IsNullOrWhiteSpace(sanitized))
         {
-            sanitized = "channel";
+            sanitized = $"{timestamp}_{channel}";
         }
 
-        return $"{DateTime.Now:yyyyMMdd_HHmmss}_{sanitized}.ts";
+        return sanitized.EndsWith(".ts", StringComparison.OrdinalIgnoreCase)
+            ? sanitized
+            : $"{sanitized}.ts";
+    }
+
+    private static string SanitizeFileNameToken(string value, string fallback)
+    {
+        var invalidCharacters = Path.GetInvalidFileNameChars().ToHashSet();
+        var sanitized = new string((value ?? string.Empty)
+            .Select(ch => invalidCharacters.Contains(ch) ? '_' : ch)
+            .ToArray())
+            .Trim(' ', '.', '_');
+
+        return string.IsNullOrWhiteSpace(sanitized) ? fallback : sanitized;
     }
 
     private void ResetRecordingState()
     {
         _isRecording = false;
         _recordingFilePath = string.Empty;
+        _activeRecordingDisplayName = string.Empty;
+        _activeRecordingProgramTitle = string.Empty;
         _recordingStartedAt = default;
         UpdateRecordingVisualState();
     }
@@ -496,6 +1205,8 @@ public partial class PlayerWindow : Window
             _recordingTimer.Stop();
             RecordingText.Text = string.Empty;
         }
+
+        UpdateRecordingScheduleVisualState();
     }
 
     private void UpdateRecordingTimerText()
@@ -802,6 +1513,7 @@ public partial class PlayerWindow : Window
         _restoreResizeMode = ResizeMode;
         _isFullScreen = true;
         PlayerToolbar.Visibility = Visibility.Collapsed;
+        RecordingSchedulePanel.Visibility = Visibility.Collapsed;
         PlayerStatusBar.Visibility = Visibility.Collapsed;
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
@@ -824,6 +1536,7 @@ public partial class PlayerWindow : Window
         ResizeMode = _restoreResizeMode;
         WindowState = _restoreWindowState;
         PlayerToolbar.Visibility = Visibility.Visible;
+        RecordingSchedulePanel.Visibility = Visibility.Visible;
         PlayerStatusBar.Visibility = Visibility.Visible;
         FullScreenButton.Content = "Full";
         ApplyTopmostState();
@@ -1008,6 +1721,7 @@ public partial class PlayerWindow : Window
         CancelReconnect();
         _networkDebitStatusTimer.Stop();
         _recordingTimer.Stop();
+        _recordingScheduleTimer.Stop();
         PreviewKeyDown -= PlayerWindow_PreviewKeyDown;
         VideoSurface.MediaPlayer = null;
         _currentMedia?.Dispose();
