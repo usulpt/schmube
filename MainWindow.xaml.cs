@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -20,10 +21,12 @@ namespace Schmube;
 public partial class MainWindow : Window
 {
     private const string AllGroupsLabel = "All groups";
+    private const string AllSubGroupsLabel = "All subgroups";
     private const string FavoritesGroupLabel = "Favorites";
     private const string RecentlyWatchedGroupLabel = "Recently Watched";
     private const string FavoritesGroupValue = "__favorites";
     private const string RecentlyWatchedGroupValue = "__recent";
+    private const string DefaultChannelSortKey = "Clean Name";
     private const string DefaultHintText = "Focus a control to see what it does.";
     private const int RecentChannelLimit = 12;
     private const int GuideWarmupLimit = 18;
@@ -45,6 +48,7 @@ public partial class MainWindow : Window
     private readonly List<PlaylistChannel> _allChannels = [];
     private readonly ObservableCollection<PlaylistChannel> _visibleChannels = [];
     private readonly ObservableCollection<GroupFilterOption> _groupOptions = [BuildAllGroupsOption()];
+    private readonly ObservableCollection<GroupFilterOption> _subGroupOptions = [BuildAllSubGroupsOption()];
     private readonly ObservableCollection<ProgramGuideEntry> _programGuideEntries = [];
     private readonly HashSet<string> _favoriteChannelKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _recentChannelKeys = [];
@@ -75,7 +79,10 @@ public partial class MainWindow : Window
     private int _recordingEndPaddingMinutes;
     private string _recordingFileNameFormat = "{timestamp}_{channel}";
     private ChannelColumnPreset _columnPreset = ChannelColumnPreset.Standard;
+    private string _channelSortKey = DefaultChannelSortKey;
+    private ListSortDirection _channelSortDirection = ListSortDirection.Ascending;
     private string _savedGroupFilter = string.Empty;
+    private string _savedSubGroupFilter = string.Empty;
     private readonly Dictionary<string, string> _customChannelGroups = new(StringComparer.OrdinalIgnoreCase);
     private List<RecordingScheduleEntry> _recordingSchedules = [];
     private List<RecordingHistoryEntry> _recordingHistory = [];
@@ -93,6 +100,8 @@ public partial class MainWindow : Window
         ChannelsListView.ItemsSource = _visibleChannels;
         GroupFilterComboBox.ItemsSource = _groupOptions;
         GroupFilterComboBox.SelectedIndex = 0;
+        SubGroupFilterComboBox.ItemsSource = _subGroupOptions;
+        SubGroupFilterComboBox.SelectedIndex = 0;
         ProgramGuideListBox.ItemsSource = _programGuideEntries;
         Loaded += MainWindow_Loaded;
         PreviewKeyDown += MainWindow_PreviewKeyDown;
@@ -100,6 +109,7 @@ public partial class MainWindow : Window
         RegisterFocusHints();
         SetHintText(DefaultHintText);
         LoadSettings();
+        InitializeSelectedRecordingInputs();
         UpdateChannelSummary();
         ClearProgramGuide("Select a channel to load the guide.");
         UpdateSelectedChannelDetails(null);
@@ -109,6 +119,11 @@ public partial class MainWindow : Window
     private static GroupFilterOption BuildAllGroupsOption()
     {
         return new(AllGroupsLabel, AllGroupsLabel);
+    }
+
+    private static GroupFilterOption BuildAllSubGroupsOption()
+    {
+        return new(AllSubGroupsLabel, AllSubGroupsLabel);
     }
 
     private static GroupFilterOption BuildFavoritesGroupOption()
@@ -123,6 +138,7 @@ public partial class MainWindow : Window
 
     private PlaylistChannel? SelectedChannel => ChannelsListView.SelectedItem as PlaylistChannel;
     private GroupFilterOption? SelectedGroupOption => GroupFilterComboBox.SelectedItem as GroupFilterOption;
+    private GroupFilterOption? SelectedSubGroupOption => SubGroupFilterComboBox.SelectedItem as GroupFilterOption;
     private bool HasTemporaryChannelList => _temporaryChannelOrder.Count > 0;
 
     private void RegisterFocusHints()
@@ -131,7 +147,8 @@ public partial class MainWindow : Window
         RegisterFocusHint(DarkModeButton, "Toggle the application theme.");
         RegisterFocusHint(KeepOnTopButton, "Keep the separate player window above your other apps while you watch.");
         RegisterFocusHint(ChannelSearchTextBox, "Filter the loaded channels by name, group, channel ID, or the live guide preview.");
-        RegisterFocusHint(GroupFilterComboBox, "Limit the channel list to one normalized group after the playlist finishes loading.");
+        RegisterFocusHint(GroupFilterComboBox, "Limit the channel list to one main country or type group after the playlist finishes loading.");
+        RegisterFocusHint(SubGroupFilterComboBox, "Limit the selected main group to one source subgroup from the playlist.");
         RegisterFocusHint(SearchAllGroupsButton, "When search text is present, search across all groups instead of limiting results to the selected group.");
         RegisterFocusHint(FavoritesOnlyButton, "Show only channels you have marked as favorites.");
         RegisterFocusHint(RecentOnlyButton, "Show only channels you played recently.");
@@ -149,6 +166,11 @@ public partial class MainWindow : Window
         RegisterFocusHint(SaveSettingsButton, "Persist the current URL, favorites, recents, and playback window setting locally.");
         RegisterFocusHint(ChannelsListView, "Browse channels here. Single-click selects a channel and double-click starts playback.");
         RegisterFocusHint(ToggleFavoriteButton, "Add or remove the selected channel from your favorites list.");
+        RegisterFocusHint(RecordSelectedChannelButton, "Start or stop recording the selected channel without opening the player window.");
+        RegisterFocusHint(SelectedRecordingDatePicker, "Date for a scheduled recording of the selected channel.");
+        RegisterFocusHint(SelectedRecordingTimeTextBox, "Start time for a scheduled recording of the selected channel, for example 21:30.");
+        RegisterFocusHint(SelectedRecordingDurationTextBox, "Scheduled recording length in minutes.");
+        RegisterFocusHint(ScheduleSelectedChannelButton, "Schedule the selected channel using the date, time, and length fields.");
         RegisterFocusHint(CustomGroupTextBox, "Assign the selected channel to a custom group.");
         RegisterFocusHint(ApplyCustomGroupButton, "Save the selected channel's custom group.");
         RegisterFocusHint(ClearCustomGroupButton, "Remove the selected channel's custom group.");
@@ -187,6 +209,7 @@ public partial class MainWindow : Window
         _pendingSelectionChannelKey = _lastPlayedChannelKey;
         _defaultGroup = _appConfig.DefaultGroup?.Trim() ?? string.Empty;
         _savedGroupFilter = settings.SelectedGroupFilter?.Trim() ?? string.Empty;
+        _savedSubGroupFilter = settings.SelectedSubGroupFilter?.Trim() ?? string.Empty;
         _customChannelGroups.Clear();
         foreach (var pair in settings.CustomChannelGroups.Where(pair => !string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value)))
         {
@@ -230,7 +253,7 @@ public partial class MainWindow : Window
     {
         if (_recordingSchedules.Count > 0)
         {
-            EnsurePlayerWindow(false);
+            EnsurePlayerWindow(focusWindow: false, showWindow: false);
             StatusTextBlock.Text = $"{_recordingSchedules.Count} scheduled recording(s) loaded.";
         }
 
@@ -255,6 +278,7 @@ public partial class MainWindow : Window
             RecentChannelKeys = _recentChannelKeys.ToList(),
             LastChannelKey = _lastPlayedChannelKey,
             SelectedGroupFilter = SelectedGroupOption?.Value ?? string.Empty,
+            SelectedSubGroupFilter = SelectedSubGroupOption?.Value ?? string.Empty,
             SearchText = ChannelSearchTextBox.Text,
             SearchAllGroups = _searchAllGroups,
             FavoritesOnly = _favoritesOnly,
@@ -280,6 +304,14 @@ public partial class MainWindow : Window
         _recordingFileNameFormat = string.IsNullOrWhiteSpace(RecordingFileNameFormatTextBox.Text)
             ? "{timestamp}_{channel}"
             : RecordingFileNameFormatTextBox.Text.Trim();
+    }
+
+    private void InitializeSelectedRecordingInputs()
+    {
+        var defaultStart = DateTime.Now.AddMinutes(5);
+        SelectedRecordingDatePicker.SelectedDate = defaultStart.Date;
+        SelectedRecordingTimeTextBox.Text = defaultStart.ToString("HH:mm", CultureInfo.CurrentCulture);
+        SelectedRecordingDurationTextBox.Text = _recordingDefaultDurationMinutes.ToString(CultureInfo.CurrentCulture);
     }
 
     private static int ReadPositiveIntSetting(TextBox textBox, int fallback, int min, int max)
@@ -330,28 +362,24 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private PlayerWindow EnsurePlayerWindow(bool focusWindow)
+    private PlayerWindow EnsurePlayerWindow(bool focusWindow, bool showWindow = true)
     {
         RefreshRecordingSettingsFromUi();
-        if (_playerWindow is null || !_playerWindow.IsLoaded)
+        if (_playerWindow is null)
         {
-            _playerWindow = new PlayerWindow
-            {
-                Owner = this
-            };
+            _playerWindow = new PlayerWindow();
             _playerWindow.ChannelStepRequested += PlayerWindow_ChannelStepRequested;
             _playerWindow.PlaybackStopped += PlayerWindow_PlaybackStopped;
             _playerWindow.RecordingStateChanged += PlayerWindow_RecordingStateChanged;
             _playerWindow.Closed += PlayerWindow_Closed;
             _playerWindow.ConfigureRecordingDefaults(_recordingDefaultDurationMinutes, _recordingFileNameFormat);
             _playerWindow.LoadRecordingState(_recordingSchedules, _recordingHistory);
-            _playerWindow.Show();
         }
 
         _playerWindow.SetAlwaysOnTop(_keepPlayerOnTop);
         _playerWindow.ConfigureRecordingDefaults(_recordingDefaultDurationMinutes, _recordingFileNameFormat);
 
-        if (!_playerWindow.IsVisible)
+        if ((showWindow || focusWindow) && !_playerWindow.IsVisible)
         {
             _playerWindow.Show();
         }
@@ -378,6 +406,7 @@ public partial class MainWindow : Window
         {
             _playerWindow = null;
             ClearNowPlaying();
+            UpdateSelectedChannelRecordingButton();
         }
     }
 
@@ -401,6 +430,7 @@ public partial class MainWindow : Window
 
         _recordingSchedules = playerWindow.GetRecordingSchedulesSnapshot().ToList();
         _recordingHistory = playerWindow.GetRecordingHistorySnapshot().ToList();
+        UpdateSelectedChannelRecordingButton();
         _settingsStore.Save(CollectSettingsFromUi());
     }
 
@@ -493,7 +523,7 @@ public partial class MainWindow : Window
 
             _allChannels.Clear();
             _allChannels.AddRange(channels
-                .OrderBy(channel => channel.GroupTitle, StringComparer.CurrentCultureIgnoreCase)
+                .OrderBy(channel => channel.CleanName, StringComparer.CurrentCultureIgnoreCase)
                 .ThenBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase));
 
             RefreshGroupOptions();
@@ -514,6 +544,7 @@ public partial class MainWindow : Window
             _currentXtreamConnection = null;
             _guideCache.Clear();
             RefreshGroupOptions();
+            RefreshSubGroupOptions();
             ClearProgramGuide("Select a channel to load the guide.");
             UpdateSelectedChannelDetails(null);
             UpdateChannelSummary();
@@ -551,9 +582,12 @@ public partial class MainWindow : Window
         {
             var groupInfo = _groupFlagStore.Resolve(channel.Name, channel.GroupTitle);
             var canonicalGroup = _canonicalGroupService.Resolve(channel, groupInfo);
+            var canonicalSubGroup = _canonicalGroupService.ResolveSubGroup(channel);
             channel.GroupFlag = groupInfo.Flag;
             channel.GroupDisplayTitle = canonicalGroup.Label;
             channel.CanonicalGroupKey = canonicalGroup.Key;
+            channel.SubGroupDisplayTitle = canonicalSubGroup.Label;
+            channel.CanonicalSubGroupKey = canonicalSubGroup.Key;
             if (_customChannelGroups.TryGetValue(channel.FavoriteKey, out var customGroup) && !string.IsNullOrWhiteSpace(customGroup))
             {
                 var label = customGroup.Trim();
@@ -577,6 +611,7 @@ public partial class MainWindow : Window
 
         ApplyRecentStates(_allChannels);
         RefreshGroupOptions();
+        RefreshSubGroupOptions();
         ApplyChannelFilter(selectFirstChannel: false);
         UpdateSelectedChannelDetails(channel);
         _settingsStore.Save(CollectSettingsFromUi());
@@ -822,7 +857,7 @@ public partial class MainWindow : Window
                 allowReconnect: true,
                 selectedChannel.LogoSource,
                 selectedChannel.GroupFlag);
-            var playerWindow = EnsurePlayerWindow(false);
+            var playerWindow = EnsurePlayerWindow(focusWindow: false, showWindow: false);
             playerWindow.ScheduleRecording(request, startAt, endAt, entry.Title);
             _recordingSchedules = playerWindow.GetRecordingSchedulesSnapshot().ToList();
             _recordingHistory = playerWindow.GetRecordingHistorySnapshot().ToList();
@@ -833,6 +868,144 @@ public partial class MainWindow : Window
         {
             StatusTextBlock.Text = $"Could not schedule recording: {ex.Message}";
         }
+    }
+
+    private async void RecordSelectedChannelButton_Click(object sender, RoutedEventArgs e)
+    {
+        var selectedChannel = SelectedChannel;
+        if (_playerWindow?.IsRecording == true)
+        {
+            if (!IsSelectedChannelActiveRecording(selectedChannel))
+            {
+                StatusTextBlock.Text = "Another channel is recording. Select that channel to stop it.";
+                UpdateSelectedChannelRecordingButton();
+                return;
+            }
+
+            RecordSelectedChannelButton.IsEnabled = false;
+            try
+            {
+                var completedFile = await _playerWindow.StopRecordingAsync();
+                _recordingSchedules = _playerWindow.GetRecordingSchedulesSnapshot().ToList();
+                _recordingHistory = _playerWindow.GetRecordingHistorySnapshot().ToList();
+                _settingsStore.Save(CollectSettingsFromUi());
+                StatusTextBlock.Text = $"Recording stopped. Saved to {completedFile}";
+            }
+            catch (Exception ex)
+            {
+                StatusTextBlock.Text = $"Could not stop recording: {ex.Message}";
+            }
+            finally
+            {
+                UpdateSelectedChannelRecordingButton();
+            }
+
+            return;
+        }
+
+        if (selectedChannel is null)
+        {
+            StatusTextBlock.Text = "Select a channel before starting a recording.";
+            return;
+        }
+
+        RecordSelectedChannelButton.IsEnabled = false;
+        try
+        {
+            var request = BuildPlaybackRequest(
+                selectedChannel.StreamUri,
+                selectedChannel.Name,
+                allowReconnect: true,
+                selectedChannel.LogoSource,
+                selectedChannel.GroupFlag);
+            var playerWindow = EnsurePlayerWindow(focusWindow: false, showWindow: false);
+            await playerWindow.StartRecordingAsync(request, backgroundRecording: !playerWindow.IsVisible);
+            _recordingSchedules = playerWindow.GetRecordingSchedulesSnapshot().ToList();
+            _recordingHistory = playerWindow.GetRecordingHistorySnapshot().ToList();
+            _settingsStore.Save(CollectSettingsFromUi());
+            StatusTextBlock.Text = $"Recording {selectedChannel.Name}.";
+        }
+        catch (Exception ex)
+        {
+            StatusTextBlock.Text = $"Could not start recording: {ex.Message}";
+        }
+        finally
+        {
+            UpdateSelectedChannelRecordingButton();
+        }
+    }
+
+    private void ScheduleSelectedChannelButton_Click(object sender, RoutedEventArgs e)
+    {
+        var selectedChannel = SelectedChannel;
+        if (selectedChannel is null)
+        {
+            StatusTextBlock.Text = "Select a channel before scheduling a recording.";
+            return;
+        }
+
+        if (!TryReadSelectedRecordingSchedule(out var startAt, out var endAt, out var errorMessage))
+        {
+            StatusTextBlock.Text = errorMessage;
+            return;
+        }
+
+        try
+        {
+            RefreshRecordingSettingsFromUi();
+            var request = BuildPlaybackRequest(
+                selectedChannel.StreamUri,
+                selectedChannel.Name,
+                allowReconnect: true,
+                selectedChannel.LogoSource,
+                selectedChannel.GroupFlag);
+            var playerWindow = EnsurePlayerWindow(focusWindow: false, showWindow: false);
+            playerWindow.ScheduleRecording(request, startAt, endAt, string.Empty);
+            _recordingSchedules = playerWindow.GetRecordingSchedulesSnapshot().ToList();
+            _recordingHistory = playerWindow.GetRecordingHistorySnapshot().ToList();
+            _settingsStore.Save(CollectSettingsFromUi());
+            StatusTextBlock.Text = $"Scheduled {selectedChannel.Name} at {startAt:g} for {endAt - startAt:hh\\:mm}.";
+        }
+        catch (Exception ex)
+        {
+            StatusTextBlock.Text = $"Could not schedule recording: {ex.Message}";
+        }
+    }
+
+    private bool TryReadSelectedRecordingSchedule(out DateTime startAt, out DateTime endAt, out string errorMessage)
+    {
+        startAt = default;
+        endAt = default;
+        errorMessage = string.Empty;
+
+        if (SelectedRecordingDatePicker.SelectedDate is not { } selectedDate)
+        {
+            errorMessage = "Choose a recording date.";
+            return false;
+        }
+
+        if (!TimeSpan.TryParse(SelectedRecordingTimeTextBox.Text.Trim(), CultureInfo.CurrentCulture, out var startTime))
+        {
+            errorMessage = "Enter the recording start time, for example 21:30.";
+            return false;
+        }
+
+        if (!int.TryParse(SelectedRecordingDurationTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.CurrentCulture, out var durationMinutes)
+            || durationMinutes < 1)
+        {
+            errorMessage = "Enter a recording length greater than 0 minutes.";
+            return false;
+        }
+
+        startAt = selectedDate.Date.Add(startTime);
+        if (startAt <= DateTime.Now)
+        {
+            errorMessage = "Choose a future recording start time.";
+            return false;
+        }
+
+        endAt = startAt.AddMinutes(Math.Clamp(durationMinutes, 1, 1440));
+        return true;
     }
 
     private void ApplyGuidePreview(PlaylistChannel channel, IReadOnlyList<ProgramGuideEntry> entries)
@@ -904,11 +1077,52 @@ public partial class MainWindow : Window
             ?? _groupOptions[0];
     }
 
+    private void RefreshSubGroupOptions(string? preferredSubGroupValue = null)
+    {
+        var selectedSubGroupValue = preferredSubGroupValue ?? SelectedSubGroupOption?.Value;
+        var selectedGroup = SelectedGroupOption?.Value;
+        var previousSuppressFilterRefresh = _suppressFilterRefresh;
+
+        _suppressFilterRefresh = true;
+        try
+        {
+            _subGroupOptions.Clear();
+            _subGroupOptions.Add(BuildAllSubGroupsOption());
+
+            var options = _allChannels
+                .Where(channel => MatchesGroup(channel, selectedGroup))
+                .Where(channel => !string.IsNullOrWhiteSpace(channel.CanonicalSubGroupKey))
+                .GroupBy(channel => channel.CanonicalSubGroupKey.Trim(), StringComparer.CurrentCultureIgnoreCase)
+                .Select(group => new GroupFilterOption(
+                    group.Key,
+                    group.Select(channel => channel.SubGroupDisplayTitle?.Trim())
+                        .FirstOrDefault(label => !string.IsNullOrWhiteSpace(label))
+                        ?? group.Key))
+                .OrderBy(option => option.Label, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(option => option.Value, StringComparer.CurrentCultureIgnoreCase);
+
+            foreach (var option in options)
+            {
+                _subGroupOptions.Add(option);
+            }
+
+            SubGroupFilterComboBox.SelectedItem = _subGroupOptions.FirstOrDefault(option =>
+                string.Equals(option.Value, selectedSubGroupValue, StringComparison.CurrentCultureIgnoreCase)
+                || string.Equals(option.Label, selectedSubGroupValue, StringComparison.CurrentCultureIgnoreCase))
+                ?? _subGroupOptions[0];
+        }
+        finally
+        {
+            _suppressFilterRefresh = previousSuppressFilterRefresh;
+        }
+    }
+
     private void SelectDefaultGroupIfAvailable()
     {
         if (string.IsNullOrWhiteSpace(_defaultGroup))
         {
             GroupFilterComboBox.SelectedItem = ResolvePreferredGroupOption(_savedGroupFilter) ?? _groupOptions[0];
+            RefreshSubGroupOptions(_savedSubGroupFilter);
             return;
         }
 
@@ -916,6 +1130,7 @@ public partial class MainWindow : Window
             string.Equals(option.Value, _defaultGroup, StringComparison.CurrentCultureIgnoreCase)
             || string.Equals(option.Label, _defaultGroup, StringComparison.CurrentCultureIgnoreCase));
         GroupFilterComboBox.SelectedItem = matchedGroup ?? _groupOptions[0];
+        RefreshSubGroupOptions(_savedSubGroupFilter);
     }
 
     private GroupFilterOption? ResolvePreferredGroupOption(string value)
@@ -936,27 +1151,17 @@ public partial class MainWindow : Window
         var preferredChannelKey = selectFirstChannel ? _pendingSelectionChannelKey : string.Empty;
         var searchText = ChannelSearchTextBox.Text.Trim();
         var selectedGroup = SelectedGroupOption?.Value;
+        var selectedSubGroup = SelectedSubGroupOption?.Value;
         var searchAllGroups = _searchAllGroups && !string.IsNullOrWhiteSpace(searchText);
-        var selectedGroupIsRecent = string.Equals(selectedGroup, RecentlyWatchedGroupValue, StringComparison.Ordinal);
 
         var filteredChannels = _allChannels
             .Where(channel => !HasTemporaryChannelList || _temporaryChannelOrder.ContainsKey(channel.StreamUri.ToString()))
             .Where(channel => MatchesSearch(channel, searchText))
-            .Where(channel => searchAllGroups || MatchesGroup(channel, selectedGroup))
+            .Where(channel => searchAllGroups || (MatchesGroup(channel, selectedGroup) && MatchesSubGroup(channel, selectedSubGroup)))
             .Where(channel => !_favoritesOnly || channel.IsFavorite)
             .Where(channel => !_recentOnly || channel.RecentRank >= 0);
 
-        var orderedChannels = HasTemporaryChannelList
-            ? filteredChannels
-                .OrderBy(channel => _temporaryChannelOrder[channel.StreamUri.ToString()])
-                .ThenBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase)
-            : _recentOnly || selectedGroupIsRecent
-                ? filteredChannels
-                    .OrderBy(channel => channel.RecentRank)
-                    .ThenBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase)
-            : filteredChannels
-                .OrderBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase)
-                .ThenBy(channel => channel.GroupDisplayTitle, StringComparer.CurrentCultureIgnoreCase);
+        var orderedChannels = SortChannels(filteredChannels);
 
         _visibleChannels.Clear();
         foreach (var channel in orderedChannels)
@@ -997,6 +1202,35 @@ public partial class MainWindow : Window
         ScheduleGuideWarmupForVisibleChannels();
     }
 
+    private IOrderedEnumerable<PlaylistChannel> SortChannels(IEnumerable<PlaylistChannel> channels)
+    {
+        var sortedChannels = _channelSortDirection == ListSortDirection.Descending
+            ? channels.OrderByDescending(channel => GetChannelSortText(channel, _channelSortKey), StringComparer.CurrentCultureIgnoreCase)
+            : channels.OrderBy(channel => GetChannelSortText(channel, _channelSortKey), StringComparer.CurrentCultureIgnoreCase);
+
+        return sortedChannels
+            .ThenBy(channel => channel.CleanName, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase);
+    }
+
+    private static string GetChannelSortText(PlaylistChannel channel, string sortKey)
+    {
+        return sortKey switch
+        {
+            "Fav" => channel.IsFavorite ? "0" : "1",
+            "Recent" => channel.RecentRank >= 0 ? channel.RecentRank.ToString("D6", CultureInfo.InvariantCulture) : "999999",
+            "Flag" => channel.GroupDisplayTitle,
+            "Logo" => channel.LogoSource,
+            "Channel" => channel.Name,
+            "Clean Name" => channel.CleanName,
+            "Now" => channel.NowTitle,
+            "Next" => channel.NextTitle,
+            "Group" => channel.GroupDisplayTitle,
+            "Source Group" => channel.GroupTitle,
+            _ => channel.CleanName
+        };
+    }
+
     private static bool MatchesSearch(PlaylistChannel channel, string searchText)
     {
         if (string.IsNullOrWhiteSpace(searchText))
@@ -1005,8 +1239,10 @@ public partial class MainWindow : Window
         }
 
         return channel.Name.Contains(searchText, StringComparison.CurrentCultureIgnoreCase)
+            || channel.CleanName.Contains(searchText, StringComparison.CurrentCultureIgnoreCase)
             || channel.GroupTitle.Contains(searchText, StringComparison.CurrentCultureIgnoreCase)
             || channel.GroupDisplayTitle.Contains(searchText, StringComparison.CurrentCultureIgnoreCase)
+            || channel.SubGroupDisplayTitle.Contains(searchText, StringComparison.CurrentCultureIgnoreCase)
             || channel.TvgId.Contains(searchText, StringComparison.CurrentCultureIgnoreCase)
             || channel.NowTitle.Contains(searchText, StringComparison.CurrentCultureIgnoreCase)
             || channel.NextTitle.Contains(searchText, StringComparison.CurrentCultureIgnoreCase);
@@ -1027,6 +1263,13 @@ public partial class MainWindow : Window
         return string.IsNullOrWhiteSpace(selectedGroup)
             || string.Equals(selectedGroup, AllGroupsLabel, StringComparison.Ordinal)
             || string.Equals(channel.CanonicalGroupKey.Trim(), selectedGroup, StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private static bool MatchesSubGroup(PlaylistChannel channel, string? selectedSubGroup)
+    {
+        return string.IsNullOrWhiteSpace(selectedSubGroup)
+            || string.Equals(selectedSubGroup, AllSubGroupsLabel, StringComparison.Ordinal)
+            || string.Equals(channel.CanonicalSubGroupKey.Trim(), selectedSubGroup, StringComparison.CurrentCultureIgnoreCase);
     }
 
     private void UpdateChannelSummary()
@@ -1059,6 +1302,15 @@ public partial class MainWindow : Window
                 : $" Group: {selectedGroupOption.Label}.";
         }
 
+        if (SelectedSubGroupOption is { Value: not "" } selectedSubGroupOption
+            && !string.Equals(selectedSubGroupOption.Value, AllSubGroupsLabel, StringComparison.Ordinal))
+        {
+            var searchAllGroups = _searchAllGroups && !string.IsNullOrWhiteSpace(ChannelSearchTextBox.Text.Trim());
+            summary += searchAllGroups
+                ? $" Subgroup: {selectedSubGroupOption.Label} (ignored while searching)."
+                : $" Subgroup: {selectedSubGroupOption.Label}.";
+        }
+
         if (_searchAllGroups && !string.IsNullOrWhiteSpace(ChannelSearchTextBox.Text.Trim()))
         {
             summary += " Searching across all groups.";
@@ -1088,6 +1340,7 @@ public partial class MainWindow : Window
 
         _temporaryListLabel = string.IsNullOrWhiteSpace(selection.Label) ? "TV listings" : selection.Label.Trim();
         GroupFilterComboBox.SelectedIndex = 0;
+        RefreshSubGroupOptions(AllSubGroupsLabel);
         ChannelSearchTextBox.Text = string.Empty;
         _favoritesOnly = false;
         _recentOnly = false;
@@ -1131,6 +1384,8 @@ public partial class MainWindow : Window
         {
             ChannelSearchTextBox.Text = string.Empty;
             GroupFilterComboBox.SelectedIndex = 0;
+            RefreshSubGroupOptions();
+            SubGroupFilterComboBox.SelectedIndex = 0;
         }
         finally
         {
@@ -1169,11 +1424,12 @@ public partial class MainWindow : Window
         SelectedChannelLogoImage.Source = null;
         CustomGroupTextBox.Text = string.Empty;
         CustomGroupTextBox.IsEnabled = false;
-        ApplyCustomGroupButton.IsEnabled = false;
-        ClearCustomGroupButton.IsEnabled = false;
-        ToggleFavoriteButton.IsEnabled = false;
-        ToggleFavoriteButton.Content = "Add Favorite";
-        return;
+            ApplyCustomGroupButton.IsEnabled = false;
+            ClearCustomGroupButton.IsEnabled = false;
+            ToggleFavoriteButton.IsEnabled = false;
+            ToggleFavoriteButton.Content = "Add Favorite";
+            UpdateSelectedChannelRecordingButton();
+            return;
         }
 
         SelectedChannelNameTextBox.Text = channel.Name;
@@ -1192,6 +1448,52 @@ public partial class MainWindow : Window
             : string.Empty;
         ToggleFavoriteButton.IsEnabled = true;
         ToggleFavoriteButton.Content = channel.IsFavorite ? "Remove Favorite" : "Add Favorite";
+        UpdateSelectedChannelRecordingButton();
+    }
+
+    private void UpdateSelectedChannelRecordingButton()
+    {
+        var selectedChannel = SelectedChannel;
+        var hasSelectedChannel = selectedChannel is not null;
+        SelectedRecordingDatePicker.IsEnabled = hasSelectedChannel;
+        SelectedRecordingTimeTextBox.IsEnabled = hasSelectedChannel;
+        SelectedRecordingDurationTextBox.IsEnabled = hasSelectedChannel;
+        ScheduleSelectedChannelButton.IsEnabled = hasSelectedChannel;
+
+        if (_playerWindow?.IsRecording == true)
+        {
+            var displayName = string.IsNullOrWhiteSpace(_playerWindow.ActiveRecordingDisplayName)
+                ? "recording"
+                : _playerWindow.ActiveRecordingDisplayName;
+            if (IsSelectedChannelActiveRecording(selectedChannel))
+            {
+                RecordSelectedChannelButton.IsEnabled = true;
+                RecordSelectedChannelButton.Content = "Stop Rec";
+                RecordSelectedChannelButton.ToolTip = $"Stop recording {displayName}.";
+            }
+            else
+            {
+                RecordSelectedChannelButton.IsEnabled = false;
+                RecordSelectedChannelButton.Content = "Recording";
+                RecordSelectedChannelButton.ToolTip = $"Recording {displayName}. Select that channel to stop it.";
+            }
+
+            return;
+        }
+
+        RecordSelectedChannelButton.IsEnabled = hasSelectedChannel;
+        RecordSelectedChannelButton.Content = "Record";
+        RecordSelectedChannelButton.ToolTip = "Start recording the selected channel without opening the player window.";
+    }
+
+    private bool IsSelectedChannelActiveRecording(PlaylistChannel? selectedChannel)
+    {
+        return selectedChannel is not null
+            && _playerWindow?.IsRecording == true
+            && string.Equals(
+                _playerWindow.ActiveRecordingStreamUri,
+                selectedChannel.StreamUri.ToString(),
+                StringComparison.OrdinalIgnoreCase);
     }
 
     private static string BuildNowPlayingText(PlaylistChannel channel)
@@ -1241,11 +1543,15 @@ public partial class MainWindow : Window
         var canonicalGroup = string.IsNullOrWhiteSpace(channel.GroupDisplayTitle)
             ? "Ungrouped"
             : channel.GroupDisplayTitle.Trim();
+        var subGroup = channel.SubGroupDisplayTitle?.Trim() ?? string.Empty;
         var rawGroup = channel.GroupTitle?.Trim() ?? string.Empty;
-
-        return string.IsNullOrWhiteSpace(rawGroup) || string.Equals(rawGroup, canonicalGroup, StringComparison.CurrentCultureIgnoreCase)
+        var displayGroup = string.IsNullOrWhiteSpace(subGroup) || string.Equals(subGroup, canonicalGroup, StringComparison.CurrentCultureIgnoreCase)
             ? canonicalGroup
-            : $"{canonicalGroup} (source: {rawGroup})";
+            : $"{canonicalGroup} / {subGroup}";
+
+        return string.IsNullOrWhiteSpace(rawGroup) || string.Equals(rawGroup, displayGroup, StringComparison.CurrentCultureIgnoreCase)
+            ? displayGroup
+            : $"{displayGroup} (source: {rawGroup})";
     }
 
     private static ImageSource? CreateLogoSource(string logoSource)
@@ -1343,6 +1649,7 @@ public partial class MainWindow : Window
         return fieldName switch
         {
             "Name" => channel.Name,
+            "CleanName" => channel.CleanName,
             "NowTitle" => channel.NowTitle,
             "NextTitle" => channel.NextTitle,
             "GroupDisplayTitle" => channel.GroupDisplayTitle,
@@ -1426,6 +1733,7 @@ public partial class MainWindow : Window
         selectedChannel.GroupFlag = string.Empty;
         RefreshGroupOptions();
         GroupFilterComboBox.SelectedItem = ResolvePreferredGroupOption(selectedChannel.CanonicalGroupKey) ?? GroupFilterComboBox.SelectedItem;
+        RefreshSubGroupOptions();
         ApplyChannelFilter(selectFirstChannel: false);
         UpdateSelectedChannelDetails(selectedChannel);
         _settingsStore.Save(CollectSettingsFromUi());
@@ -1449,6 +1757,7 @@ public partial class MainWindow : Window
 
         ApplyGroupFlags([selectedChannel]);
         RefreshGroupOptions();
+        RefreshSubGroupOptions();
         ApplyChannelFilter(selectFirstChannel: false);
         UpdateSelectedChannelDetails(selectedChannel);
         _settingsStore.Save(CollectSettingsFromUi());
@@ -1479,6 +1788,7 @@ public partial class MainWindow : Window
 
         _settingsStore.Save(CollectSettingsFromUi());
         RefreshGroupOptions();
+        RefreshSubGroupOptions();
         ApplyChannelFilter(selectFirstChannel: false);
     }
 
@@ -1533,13 +1843,13 @@ public partial class MainWindow : Window
         switch (preset)
         {
             case ChannelColumnPreset.Compact:
-                SetChannelColumnWidths(favorite: 34, recent: 0, flag: 72, logo: 0, channel: 260, now: 220, next: 0, group: 130, sourceGroup: 0);
+                SetChannelColumnWidths(favorite: 34, recent: 0, flag: 72, logo: 0, cleanName: 260, channel: 0, now: 220, next: 0, group: 130, sourceGroup: 0);
                 break;
             case ChannelColumnPreset.Detail:
-                SetChannelColumnWidths(favorite: 38, recent: 52, flag: 96, logo: 64, channel: 250, now: 210, next: 210, group: 170, sourceGroup: 210);
+                SetChannelColumnWidths(favorite: 38, recent: 52, flag: 96, logo: 64, cleanName: 240, channel: 220, now: 210, next: 210, group: 170, sourceGroup: 210);
                 break;
             default:
-                SetChannelColumnWidths(favorite: 38, recent: 52, flag: 96, logo: 64, channel: 210, now: 180, next: 180, group: 160, sourceGroup: 190);
+                SetChannelColumnWidths(favorite: 38, recent: 52, flag: 96, logo: 64, cleanName: 230, channel: 180, now: 180, next: 180, group: 160, sourceGroup: 190);
                 break;
         }
 
@@ -1553,12 +1863,13 @@ public partial class MainWindow : Window
             : ChannelColumnPreset.Standard;
     }
 
-    private void SetChannelColumnWidths(double favorite, double recent, double flag, double logo, double channel, double now, double next, double group, double sourceGroup)
+    private void SetChannelColumnWidths(double favorite, double recent, double flag, double logo, double cleanName, double channel, double now, double next, double group, double sourceGroup)
     {
         FavoriteColumn.Width = favorite;
         RecentColumn.Width = recent;
         FlagColumn.Width = flag;
         LogoColumn.Width = logo;
+        CleanNameColumn.Width = cleanName;
         ChannelColumn.Width = channel;
         NowColumn.Width = now;
         NextColumn.Width = next;
@@ -1598,12 +1909,19 @@ public partial class MainWindow : Window
             return;
         }
 
+        var selectedSubGroup = SelectedSubGroupOption;
+        var hasSubGroupFilter = selectedSubGroup is not null
+            && !string.Equals(selectedSubGroup.Value, AllSubGroupsLabel, StringComparison.Ordinal);
+        var exportLabel = hasSubGroupFilter
+            ? $"{selectedGroup.Label} - {selectedSubGroup!.Label}"
+            : selectedGroup.Label;
         var channels = _allChannels
             .Where(channel => MatchesGroup(channel, selectedGroup.Value))
+            .Where(channel => !hasSubGroupFilter || MatchesSubGroup(channel, selectedSubGroup!.Value))
             .OrderBy(channel => channel.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
 
-        ExportM3uChannels(selectedGroup.Label, channels, $"schmube-{BuildSafeFileName(selectedGroup.Label)}");
+        ExportM3uChannels(exportLabel, channels, $"schmube-{BuildSafeFileName(exportLabel)}");
     }
 
     private void ExportVisibleM3uMenuItem_Click(object sender, RoutedEventArgs e)
@@ -1796,6 +2114,35 @@ public partial class MainWindow : Window
         await LoadProgramGuideAsync(selectedChannel);
     }
 
+    private void ChannelsGridViewColumnHeader_Click(object sender, RoutedEventArgs e)
+    {
+        if (e.OriginalSource is not GridViewColumnHeader { Column: { } column } header)
+        {
+            return;
+        }
+
+        var sortKey = (column.Header as string ?? header.Content as string)?.Trim();
+        if (string.IsNullOrWhiteSpace(sortKey))
+        {
+            return;
+        }
+
+        if (string.Equals(_channelSortKey, sortKey, StringComparison.Ordinal))
+        {
+            _channelSortDirection = _channelSortDirection == ListSortDirection.Ascending
+                ? ListSortDirection.Descending
+                : ListSortDirection.Ascending;
+        }
+        else
+        {
+            _channelSortKey = sortKey;
+            _channelSortDirection = ListSortDirection.Ascending;
+        }
+
+        ApplyChannelFilter(selectFirstChannel: false);
+        StatusTextBlock.Text = $"Sorted channels by {sortKey} {(_channelSortDirection == ListSortDirection.Ascending ? "ascending" : "descending")}.";
+    }
+
     private void ChannelSearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (_suppressFilterRefresh)
@@ -1808,6 +2155,18 @@ public partial class MainWindow : Window
     }
 
     private void GroupFilterComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressFilterRefresh)
+        {
+            return;
+        }
+
+        _searchDebounceTimer.Stop();
+        RefreshSubGroupOptions();
+        ApplyChannelFilter(selectFirstChannel: false);
+    }
+
+    private void SubGroupFilterComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressFilterRefresh)
         {

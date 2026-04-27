@@ -93,6 +93,7 @@ public partial class PlayerWindow : Window
     private string _activeRecordingProgramTitle = string.Empty;
     private DateTime _recordingStartedAt;
     private bool _isScheduledRecordingActive;
+    private bool _isBackgroundRecordingActive;
     private bool _scheduleSwitchWarningShown;
     private int _recordingDefaultDurationMinutes = 60;
     private string _recordingFileNameFormat = "{timestamp}_{channel}";
@@ -112,6 +113,14 @@ public partial class PlayerWindow : Window
     public event EventHandler<int>? ChannelStepRequested;
     public event EventHandler? PlaybackStopped;
     public event EventHandler? RecordingStateChanged;
+
+    public bool IsRecording => _isRecording;
+
+    public string ActiveRecordingDisplayName => _activeRecordingDisplayName;
+
+    public string ActiveRecordingStreamUri => _isRecording && _currentRequest is not null
+        ? _currentRequest.StreamUri.ToString()
+        : string.Empty;
 
     public PlayerWindow()
     {
@@ -253,17 +262,19 @@ public partial class PlayerWindow : Window
         var media = new Media(_libVlc, request.StreamUri);
         if (_isRecording && !string.IsNullOrWhiteSpace(_recordingFilePath))
         {
-            media.AddOption(BuildRecordingSoutOption(_recordingFilePath));
+            media.AddOption(BuildRecordingSoutOption(_recordingFilePath, includeDisplay: !_isBackgroundRecordingActive));
             media.AddOption(":sout-keep");
         }
 
         return media;
     }
 
-    private static string BuildRecordingSoutOption(string recordingFilePath)
+    private static string BuildRecordingSoutOption(string recordingFilePath, bool includeDisplay)
     {
         var normalizedPath = recordingFilePath.Replace('\\', '/').Replace("'", "\\'");
-        return $":sout=#duplicate{{dst=display,dst=std{{access=file,mux=ts,dst='{normalizedPath}'}}}}";
+        return includeDisplay
+            ? $":sout=#duplicate{{dst=display,dst=std{{access=file,mux=ts,dst='{normalizedPath}'}}}}"
+            : $":sout=#std{{access=file,mux=ts,dst='{normalizedPath}'}}";
     }
 
     private void UpdateNowPlayingLogo(string logoSource, string fallbackLogoSource)
@@ -448,11 +459,80 @@ public partial class PlayerWindow : Window
             return;
         }
 
-        BeginRecordingCore(request);
+        BeginRecordingCore(request, backgroundRecording: false);
+        NotifyRecordingStateChanged();
         SetStatus($"Recording to {_recordingFilePath}");
     }
 
-    private void BeginRecordingCore(PlaybackRequest request, RecordingScheduleEntry? schedule = null)
+    public Task StartRecordingAsync(PlaybackRequest request, bool backgroundRecording)
+    {
+        return Dispatcher.InvokeAsync(() =>
+        {
+            if (_isRecording)
+            {
+                throw new InvalidOperationException($"Already recording {ActiveRecordingDisplayName}.");
+            }
+
+            CancelReconnect();
+            _manualStopRequested = false;
+            _reconnectAttempt = 0;
+            _currentRequest = request;
+
+            SetAlwaysOnTop(request.KeepPlayerOnTop);
+            NowPlayingText.Text = request.DisplayName;
+            UpdateNowPlayingLogo(request.LogoSource, request.FallbackLogoSource);
+            Title = $"Schmube Player - {request.DisplayName}";
+
+            try
+            {
+                BeginRecordingCore(request, backgroundRecording: backgroundRecording);
+            }
+            catch
+            {
+                if (backgroundRecording)
+                {
+                    _currentRequest = null;
+                    UpdateNowPlayingLogo(string.Empty, string.Empty);
+                    NowPlayingText.Text = "No stream loaded";
+                    Title = "Schmube Player";
+                    SetPlaybackBadge("Idle");
+                }
+
+                throw;
+            }
+
+            UpdateRecordingScheduleVisualState();
+            UpdateScreenshotButtonState();
+            NotifyRecordingStateChanged();
+            SetStatus($"Recording to {_recordingFilePath}");
+        }).Task;
+    }
+
+    public Task<string> StopRecordingAsync()
+    {
+        return Dispatcher.InvokeAsync(() =>
+        {
+            if (!_isRecording || _currentRequest is null)
+            {
+                throw new InvalidOperationException("No recording is running.");
+            }
+
+            var completedFile = StopRecordingCore(_currentRequest, _isScheduledRecordingActive ? "Cancelled" : "Stopped");
+            if (_activeScheduledRecording is not null)
+            {
+                _recordingSchedules.Remove(_activeScheduledRecording);
+                _activeScheduledRecording = null;
+                _isScheduledRecordingActive = false;
+                EnsureRecordingScheduleTimer();
+                NotifyRecordingStateChanged();
+            }
+
+            SetStatus($"Recording stopped. Saved to {completedFile}");
+            return completedFile;
+        }).Task;
+    }
+
+    private void BeginRecordingCore(PlaybackRequest request, RecordingScheduleEntry? schedule = null, bool backgroundRecording = false)
     {
         var recordingsDirectory = ResolveRecordingsDirectory(request.RecordingsDirectory);
         Directory.CreateDirectory(recordingsDirectory);
@@ -461,6 +541,7 @@ public partial class PlayerWindow : Window
         _activeRecordingDisplayName = request.DisplayName;
         _activeRecordingProgramTitle = schedule?.ProgramTitle ?? string.Empty;
         _isRecording = true;
+        _isBackgroundRecordingActive = backgroundRecording;
         _recordingStartedAt = DateTime.Now;
         UpdateRecordingVisualState();
         try
@@ -474,6 +555,7 @@ public partial class PlayerWindow : Window
             _activeRecordingDisplayName = string.Empty;
             _activeRecordingProgramTitle = string.Empty;
             _recordingStartedAt = default;
+            _isBackgroundRecordingActive = false;
             UpdateRecordingVisualState();
             throw;
         }
@@ -485,13 +567,30 @@ public partial class PlayerWindow : Window
         var startedAt = _recordingStartedAt == default ? DateTime.Now : _recordingStartedAt;
         var displayName = string.IsNullOrWhiteSpace(_activeRecordingDisplayName) ? request.DisplayName : _activeRecordingDisplayName;
         var programTitle = _activeRecordingProgramTitle;
+        var wasBackgroundRecording = _isBackgroundRecordingActive;
         _isRecording = false;
         _recordingFilePath = string.Empty;
         _activeRecordingDisplayName = string.Empty;
         _activeRecordingProgramTitle = string.Empty;
         _recordingStartedAt = default;
+        _isBackgroundRecordingActive = false;
         UpdateRecordingVisualState();
-        StartPlaybackCore(request, isReconnect: false);
+        if (wasBackgroundRecording)
+        {
+            _mediaPlayer.Stop();
+            _currentRequest = null;
+            UpdateNowPlayingLogo(string.Empty, string.Empty);
+            NowPlayingText.Text = "No stream loaded";
+            Title = "Schmube Player";
+            SetPlaybackBadge("Idle");
+        }
+        else
+        {
+            StartPlaybackCore(request, isReconnect: false);
+        }
+
+        UpdateRecordingScheduleVisualState();
+        UpdateScreenshotButtonState();
         AddRecordingHistory(displayName, programTitle, completedFile, startedAt, DateTime.Now, status);
         return completedFile;
     }
@@ -778,9 +877,10 @@ public partial class PlayerWindow : Window
             UpdateNowPlayingLogo(request.LogoSource, request.FallbackLogoSource);
             Title = $"Schmube Player - {request.DisplayName}";
 
-            BeginRecordingCore(request, schedule);
+            BeginRecordingCore(request, schedule, backgroundRecording: !IsVisible);
             UpdateRecordingScheduleVisualState();
             UpdateScreenshotButtonState();
+            NotifyRecordingStateChanged();
             SetStatus($"Scheduled recording started for {request.DisplayName}. Saving to {_recordingFilePath}");
         }
         catch (Exception ex)
@@ -788,6 +888,7 @@ public partial class PlayerWindow : Window
             _isRecording = false;
             _recordingFilePath = string.Empty;
             _recordingStartedAt = default;
+            _isBackgroundRecordingActive = false;
             _activeScheduledRecording = null;
             _isScheduledRecordingActive = false;
             _recordingSchedules.Remove(schedule);
@@ -1180,6 +1281,7 @@ public partial class PlayerWindow : Window
         _activeRecordingDisplayName = string.Empty;
         _activeRecordingProgramTitle = string.Empty;
         _recordingStartedAt = default;
+        _isBackgroundRecordingActive = false;
         UpdateRecordingVisualState();
     }
 

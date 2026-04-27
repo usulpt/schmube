@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 
@@ -21,6 +22,8 @@ public sealed class StreamSettings
     public string LastChannelKey { get; set; } = string.Empty;
 
     public string SelectedGroupFilter { get; set; } = string.Empty;
+
+    public string SelectedSubGroupFilter { get; set; } = string.Empty;
 
     public string SearchText { get; set; } = string.Empty;
 
@@ -196,6 +199,8 @@ public sealed class PlaylistChannel : INotifyPropertyChanged
     private string _groupFlag = string.Empty;
     private string _groupDisplayTitle = string.Empty;
     private string _canonicalGroupKey = string.Empty;
+    private string _subGroupDisplayTitle = string.Empty;
+    private string _canonicalSubGroupKey = string.Empty;
 
     public required string Name { get; init; }
 
@@ -269,6 +274,20 @@ public sealed class PlaylistChannel : INotifyPropertyChanged
         set => SetField(ref _canonicalGroupKey, value);
     }
 
+    public string SubGroupDisplayTitle
+    {
+        get => _subGroupDisplayTitle;
+        set => SetField(ref _subGroupDisplayTitle, value);
+    }
+
+    public string CanonicalSubGroupKey
+    {
+        get => _canonicalSubGroupKey;
+        set => SetField(ref _canonicalSubGroupKey, value);
+    }
+
+    public string CleanName => BuildCleanName(Name);
+
     public string FavoriteKey => string.IsNullOrWhiteSpace(TvgId) ? StreamUri.ToString() : TvgId;
 
     public string FavoriteMarker => IsFavorite ? "*" : string.Empty;
@@ -292,6 +311,27 @@ public sealed class PlaylistChannel : INotifyPropertyChanged
     private void OnPropertyChanged([CallerMemberName] string propertyName = "")
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+
+    private static string BuildCleanName(string name)
+    {
+        var trimmedName = (name ?? string.Empty).Trim();
+        var separatorIndex = trimmedName.IndexOf(':');
+        if (separatorIndex <= 0 || separatorIndex >= trimmedName.Length - 1)
+        {
+            return trimmedName;
+        }
+
+        var prefix = trimmedName[..separatorIndex].Trim();
+        if (prefix.Length > 16
+            || prefix.IndexOfAny(['|', '(', ')', '[', ']']) >= 0
+            || !prefix.Any(char.IsLetter))
+        {
+            return trimmedName;
+        }
+
+        var cleanedName = trimmedName[(separatorIndex + 1)..].Trim();
+        return string.IsNullOrWhiteSpace(cleanedName) ? trimmedName : cleanedName;
     }
 }
 

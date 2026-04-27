@@ -99,7 +99,7 @@ public sealed class GroupFlagStore
         ["YEMEN"] = "YE",
         ["SD"] = "SD",
         ["SUDAN"] = "SD",
-        ["TN"] = "TN",
+        ["TN"] = "TW",
         ["TUNISIA"] = "TN",
         ["ALGERIE"] = "DZ",
         ["AL"] = "AL",

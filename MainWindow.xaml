@@ -224,11 +224,25 @@
                 </StackPanel>
 
                 <StackPanel Width="140" Margin="0,0,10,0">
-                    <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Group" />
+                    <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Country / Type" />
                     <ComboBox x:Name="GroupFilterComboBox"
                               Style="{StaticResource MainGroupComboBoxStyle}"
                               Height="32"
                               SelectionChanged="GroupFilterComboBox_SelectionChanged">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Label}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </StackPanel>
+
+                <StackPanel Width="180" Margin="0,0,10,0">
+                    <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="Subgroup" />
+                    <ComboBox x:Name="SubGroupFilterComboBox"
+                              Style="{StaticResource MainGroupComboBoxStyle}"
+                              Height="32"
+                              SelectionChanged="SubGroupFilterComboBox_SelectionChanged">
                         <ComboBox.ItemTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding Label}" />
@@ -373,15 +387,53 @@
                                          Style="{StaticResource SelectableInfoTextBoxStyle}"
                                          Margin="0,0,0,10"
                                          Foreground="{DynamicResource SecondaryTextBrush}" />
-                                <Button x:Name="ToggleFavoriteButton"
-                                        Width="124"
-                                        Height="30"
-                                        HorizontalAlignment="Left"
-                                        Content="Add Favorite"
-                                        Click="ToggleFavoriteButton_Click"
-                                        ToolTip="Add or remove the selected channel from your favorites (F)." />
+                                <WrapPanel>
+                                    <Button x:Name="ToggleFavoriteButton"
+                                            Width="124"
+                                            Height="30"
+                                            Margin="0,0,8,0"
+                                            Content="Add Favorite"
+                                            Click="ToggleFavoriteButton_Click"
+                                            ToolTip="Add or remove the selected channel from your favorites (F)." />
+                                    <Button x:Name="RecordSelectedChannelButton"
+                                            Width="92"
+                                            Height="30"
+                                            Content="Record"
+                                            Click="RecordSelectedChannelButton_Click"
+                                            ToolTip="Start or stop recording the selected channel without opening the player window." />
+                                </WrapPanel>
                             </StackPanel>
                         </Grid>
+
+                        <TextBlock Style="{StaticResource SelectedChannelFieldLabelStyle}" Text="Channel Recording" />
+                        <WrapPanel Margin="0,0,0,12">
+                            <DatePicker x:Name="SelectedRecordingDatePicker"
+                                        Width="116"
+                                        Height="30"
+                                        Margin="0,0,6,6"
+                                        ToolTip="Date for a scheduled recording of the selected channel." />
+                            <TextBox x:Name="SelectedRecordingTimeTextBox"
+                                     Width="54"
+                                     Height="30"
+                                     Margin="0,0,6,6"
+                                     Padding="8,5"
+                                     VerticalContentAlignment="Center"
+                                     ToolTip="Start time for a scheduled recording, for example 21:30." />
+                            <TextBox x:Name="SelectedRecordingDurationTextBox"
+                                     Width="54"
+                                     Height="30"
+                                     Margin="0,0,6,6"
+                                     Padding="8,5"
+                                     VerticalContentAlignment="Center"
+                                     ToolTip="Scheduled recording length in minutes." />
+                            <Button x:Name="ScheduleSelectedChannelButton"
+                                    Width="78"
+                                    Height="30"
+                                    Margin="0,0,0,6"
+                                    Content="Schedule"
+                                    Click="ScheduleSelectedChannelButton_Click"
+                                    ToolTip="Schedule the selected channel using the date, time, and length fields." />
+                        </WrapPanel>
 
                         <TextBox x:Name="ChannelSummaryTextBox"
                                  Style="{StaticResource SelectableInfoTextBoxStyle}"
@@ -524,7 +576,8 @@
                           VirtualizingPanel.IsVirtualizing="True"
                           VirtualizingPanel.VirtualizationMode="Recycling"
                           SelectionChanged="ChannelsListView_SelectionChanged"
-                          MouseDoubleClick="ChannelsListView_MouseDoubleClick">
+                          MouseDoubleClick="ChannelsListView_MouseDoubleClick"
+                          GridViewColumnHeader.Click="ChannelsGridViewColumnHeader_Click">
                     <ListView.View>
                         <GridView AllowsColumnReorder="False">
                             <GridViewColumn x:Name="FavoriteColumn" Header="Fav" Width="38" DisplayMemberBinding="{Binding FavoriteMarker}" />
@@ -577,7 +630,18 @@
                                     </DataTemplate>
                                 </GridViewColumn.CellTemplate>
                             </GridViewColumn>
-                            <GridViewColumn x:Name="ChannelColumn" Header="Channel" Width="220">
+                            <GridViewColumn x:Name="CleanNameColumn" Header="Clean Name" Width="220">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Tag="CleanName"
+                                                   ToolTip="{Binding CleanName}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Loaded="HighlightedChannelTextBlock_Loaded"
+                                                   DataContextChanged="HighlightedChannelTextBlock_DataContextChanged" />
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
+                            <GridViewColumn x:Name="ChannelColumn" Header="Channel" Width="180">
                                 <GridViewColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Tag="Name"
